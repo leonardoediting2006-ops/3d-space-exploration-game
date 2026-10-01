@@ -1,7 +1,0 @@
-node_modules/
-dist/
-*.tsbuildinfo
-.env*
-.hoplite/artifacts/
-playwright-report/
-test-results/
