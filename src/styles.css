@@ -1317,3 +1317,17 @@ kbd {
   margin: 0 4px;
   color: var(--dim);
 }
+
+.crash {
+  max-width: 520px;
+  margin: 12vh auto;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  user-select: text;
+}
+.crash h1 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}

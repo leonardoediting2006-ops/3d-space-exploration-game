@@ -326,18 +326,25 @@ const SHORTCUTS: [string, string][] = [
   ['[  ]', 'Slide layer so its in / out point meets the playhead'],
   ['Alt + [  ]', 'Trim layer in / out point to the playhead'],
   ['B / N', 'Set work area start / end to the playhead'],
-  ['V  H  Z  Q', 'Selection, Hand, Zoom and Shape tools'],
+  ['V  H  Z  Q  G  Y', 'Selection, Hand, Zoom, Shape, Pen and Anchor-point tools'],
   ['Arrow keys', 'Nudge selected layers (Shift = 10 px)'],
-  ['F9', 'Easy ease selected keyframes'],
+  ['F9 / Shift+F9 / Ctrl+Shift+F9', 'Easy ease / ease in / ease out the selected keyframes'],
+  ['Ctrl+C / X / V', 'Copy / cut / paste layers or keyframes (pasted at the playhead)'],
   ['Ctrl+D', 'Duplicate layers'],
+  ['Ctrl+Shift+D', 'Split the selected layers at the playhead'],
   ['Ctrl+Shift+C', 'Pre-compose selected layers'],
   ['Ctrl+] / Ctrl+[', 'Bring forward / send backward (add Shift for front / back)'],
-  ['Delete', 'Delete selected keyframes, or layers'],
+  ['Delete', 'Delete the selected vertex, keyframes, or layers'],
   ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
-  ['Ctrl+S / Ctrl+O', 'Save / open project'],
+  ['Ctrl+S / Ctrl+O / Ctrl+M', 'Save / open project, export'],
   ['Mouse wheel', 'Zoom the viewer (Ctrl + wheel zooms the timeline)'],
   ['Shift while dragging a handle', 'Constrain scale / snap rotation to 15°'],
-  ['Right-click a keyframe', 'Interpolation: linear, hold, easy ease…'],
+  ['Alt while dragging in the timeline', 'Bypass snapping'],
+  ['Pen: click / drag / Enter / Esc', 'Add vertex / pull out curve handles / finish an open path / cancel'],
+  ['Select tool on a path or mask', 'Drag vertices & handles · double-click a segment to add a vertex · Alt-click a vertex to toggle smooth/corner'],
+  ['Select tool on a motion path', 'Drag keyframe points & handles · Alt-drag a keyframe to pull out a curve'],
+  ['Double-click a keyframe', 'Open the bezier easing editor'],
+  ['Right-click a keyframe', 'Interpolation, motion-path smoothing, time-reverse'],
   ['Right-click a property', 'Add wiggle, loop animation'],
 ];
 
@@ -368,10 +375,10 @@ function AboutDialog() {
         product.
       </p>
       <p className="note">
-        Compositions, layers, keyframes with bezier easing, wiggle and loop, parenting, blend modes, track mattes, adjustment layers, effects, precomps, motion blur,
-        and frame-accurate export — all rendered locally on your machine. Projects save as plain JSON files.
+        Compositions, layers, keyframes with bezier easing and curved motion paths, wiggle and loop, parenting, blend modes, track mattes, masks, pen-drawn shapes,
+        adjustment layers, effects, precomps, motion blur, and frame-accurate export — all rendered locally on your machine. Projects save as plain JSON files.
       </p>
-      <p className="note">Limitations: 2D only (no 3D layers or cameras), no audio, no masks / bezier paths, no video footage import, and straight-line motion paths.</p>
+      <p className="note">Limitations: 2D only (no 3D layers or cameras), no audio, no video footage import, and no expressions beyond wiggle and loop.</p>
       <div className="modal-actions">
         <button className="primary" onClick={closeDialog}>
           Close

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { createDemoProject } from './core/demo';
 import { serializeProject } from './core/serialize';
 import { allAssetData } from './render/assets';
@@ -41,7 +42,9 @@ async function boot() {
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
   // Debug hook for the end-to-end tests: always on in dev, opt-in in builds with ?debug
