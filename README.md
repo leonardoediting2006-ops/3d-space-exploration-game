@@ -27,7 +27,8 @@ Open it and you land in a small demo composition. **Space** plays and **File →
 - Per-segment **bezier easing** with an interactive curve editor (overshoot supported), linear, hold, Easy Ease / In / Out, time-reverse.
 - **Curved motion paths** for Position with constant-speed (arc-length) timing, drag points and handles in the viewer, one-click auto-bezier smoothing.
 - **Wiggle** and **loop** (cycle / ping-pong) as built-in, deterministic property modifiers — no scripting involved.
-- Animation presets (fade, slide, pop, spin, pulse, wiggle).
+- **Text animators** — AE-style range selectors over characters, words or lines that move, scale, rotate, fade, space and tint individual letters (with a per-letter ease: back, elastic, bounce).
+- **Multi-stop gradients** (linear, radial, angular, reflected; repeat/mirror; animatable colours and phase) with a stop editor — fill any layer, text included.
 
 **Layers**
 - Solids, shape layers (rectangle, ellipse, polygon, star, **freeform bezier paths** with trim paths), text, images, nulls, adjustment layers, precomps.
@@ -37,7 +38,7 @@ Open it and you land in a small demo composition. **Space** plays and **File →
 
 **Rendering**
 - Per-layer transform, opacity, blend, effects stack, masks, mattes, adjustment layers, precomps — all composited in a single pass.
-- Real **motion blur** (sub-frame accumulation in float space, shutter angle) and 21 effects: Gaussian / Directional blur, Mosaic, Brightness & Contrast, Levels, Hue/Saturation, Black & White, Invert, Tint, Threshold, Posterize, Drop Shadow, Glow, Vignette, Fill, Gradient Ramp, Checkerboard, Noise, Fractal Noise, Linear / Radial Wipe.
+- Real **motion blur** (sub-frame accumulation in float space, shutter angle) and 22 effects (including a multi-stop **Gradient Fill**): Gaussian / Directional blur, Mosaic, Brightness & Contrast, Levels, Hue/Saturation, Black & White, Invert, Tint, Threshold, Posterize, Drop Shadow, Glow, Vignette, Fill, Gradient Ramp, Checkerboard, Noise, Fractal Noise, Linear / Radial Wipe.
 - Each layer is processed only inside its own transformed bounds (plus effect padding), so small layers stay cheap and off-screen layers cost nothing.
 
 **Output**
@@ -47,6 +48,22 @@ Open it and you land in a small demo composition. **Space** plays and **File →
 **Projects**
 - Save / open as a plain-JSON `.kfs` file; autosave to browser storage; undo/redo (drags collapse to one step).
 - Project files are treated as untrusted input: strictly validated, size-limited, and never evaluated.
+
+## Template library
+
+The **Library** tab holds **333 ready-made templates**, each shown as a live thumbnail rendered by the real renderer (hover to play the animation). Everything it applies is ordinary, editable keyframes, effects and animators — nothing is baked.
+
+| Category | Count | What it does |
+| --- | --- | --- |
+| **Text Styles** | 44 | Neon (6), outlines, shadows & 3D extrude, glitch, gradients (sunset, fire, ice, rainbow…), metals (gold foil, chrome, rose gold), retro / comic / terminal / horror… Replaces the previous style, keeps your own effects. |
+| **Text Animations** | 44 | Typewriter, soft/word/line/scatter reveals; per-letter entrances (slide, drop & bounce, pop, elastic, spin, flip, tumble, zoom, spread); exits; looping waves, highlight sweeps, breathing, colour pulse. |
+| **Gradients** | 54 | Warm, cool, vivid, spectrum, pastel, metal, nature, basic. Fill the selection, or **BG** adds a full-frame gradient background. |
+| **Easing** | 53 | Sine → expo/circ, back/overshoot, bounce, elastic, spring, steps, Material/UI curves — as a gallery (also inside the keyframe curve editor). |
+| **Motion** | 63 | Slide/zoom/pop/bounce/elastic/drop/spin/flip/blur/glitch/wipe in & out, loops (pulse, heartbeat, float, sway, shake…), curved paths (orbit, figure-eight, arc, S-curve), one-shot emphasis (rubber band, tada, jello, hop…). |
+| **Looks** | 40 | Glows & bloom, shadows, grades (noir, sepia, duotones, tints, faded film), VHS / RGB split / pixelate, animated focus-in, flash, hue cycle. |
+| **Scenes** | 35 | Gradient & animated backgrounds (flowing aurora, clouds, bokeh), title cards, lower thirds, loader ring, progress bar, confetti burst, ripples, twinkling stars. |
+
+Templates are plain data in `src/templates/`; a unit test applies every one, checks it survives a save/load round trip, and checks that re-applying never stacks duplicates, and a browser test renders every thumbnail at several times.
 
 ## Keyboard shortcuts (essentials)
 
@@ -64,6 +81,7 @@ Open it and you land in a small demo composition. **Space** plays and **File →
 
 ```
 src/
+  templates/ The library: easing, gradients, text styles/animations, motion, looks, scenes — plain data plus small authoring helpers.
   core/      Pure data & maths — no DOM. The document model (types.ts), keyframe interpolation incl. bezier
              easing, wiggle, loops and arc-length motion paths (interp.ts), bezier path geometry (path.ts),
              effect definitions, factories, project (de)serialisation and validation.
@@ -104,8 +122,8 @@ Things a full compositing suite has that this does **not**:
 - No 3D layers, cameras or lights (strictly 2D).
 - No audio, and no video-file footage (images only).
 - No expression language — only the built-in wiggle and loop modifiers.
-- No text animators, per-character styling, or text on a path.
-- Shape layers hold one shape each: no shape groups, repeaters, merge/boolean paths or gradient fills.
+- Text animators cover per-letter transforms, opacity, spacing and colour, but not per-letter blur, wiggle selectors or text on a path.
+- Shape layers hold one shape each: no shape groups, repeaters or merge/boolean paths. Gradients are applied with the Gradient Fill effect, so they colour the whole layer (fill and stroke together).
 - No graph editor with value/speed graphs (there is a per-segment bezier easing editor), no time remapping or stretch.
 - No motion tracking, stabilisation, roto brush, or colour management.
 - No plugin/effect SDK, and no import of other applications' project files.

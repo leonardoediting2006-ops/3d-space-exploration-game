@@ -1,4 +1,4 @@
-import { evalColor, evalNum, evalVec } from './interp';
+import { evalColor, evalNum, evalVec, NAMED_EASE_FNS } from './interp';
 import { lerp } from './math';
 import type { RGB, TextAnimator, Vec2 } from './types';
 
@@ -10,6 +10,8 @@ export interface AnimValues {
   smooth: number;
   units: number;
   shape: number;
+  /** Easing curve applied to the ramp shapes (see RAMP_EASES). */
+  ease: number;
   random: boolean;
   seed: number;
   position: Vec2;
@@ -30,6 +32,7 @@ export function evalAnimator(a: TextAnimator, t: number): AnimValues {
     smooth: evalNum(p.smooth, t),
     units: Math.round(evalNum(p.units, t)),
     shape: Math.round(evalNum(p.shape, t)),
+    ease: p.ease ? Math.round(evalNum(p.ease, t)) : 0,
     random: evalNum(p.random, t) >= 0.5,
     seed: Math.round(evalNum(p.seed, t)),
     position: evalVec(p.position, t),
@@ -41,6 +44,17 @@ export function evalAnimator(a: TextAnimator, t: number): AnimValues {
     color: evalColor(p.color, t),
   };
 }
+
+/** Progress curves for the ramp shapes: 0 = linear, then out / in / in-out, back overshoot, elastic, bounce. */
+export const RAMP_EASES: ((p: number) => number)[] = [
+  (p) => p,
+  (p) => 1 - (1 - p) ** 3,
+  (p) => p ** 3,
+  (p) => p * p * (3 - 2 * p),
+  (p) => 1 + 2.70158 * (p - 1) ** 3 + 1.70158 * (p - 1) ** 2,
+  NAMED_EASE_FNS.elasticOut,
+  NAMED_EASE_FNS.bounceOut,
+];
 
 /** What the animators do to one character. */
 export interface CharStyle {
@@ -136,11 +150,13 @@ export function coverage(i: number, n: number, v: AnimValues): number {
   }
   if (mid < s || mid > e || e - s < 1e-9) return 0;
   const r = (mid - s) / (e - s);
+  // A letter passing through a ramp moves with progress p = 1 - r; the chosen curve shapes that motion.
+  const ease = RAMP_EASES[Math.min(RAMP_EASES.length - 1, Math.max(0, v.ease))];
   switch (v.shape) {
     case 1:
-      return r;
+      return 1 - ease(1 - r);
     case 2:
-      return 1 - r;
+      return ease(1 - r);
     case 3:
       return 1 - Math.abs(2 * r - 1);
     case 4:

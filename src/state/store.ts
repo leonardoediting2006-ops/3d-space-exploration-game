@@ -34,7 +34,7 @@ export function useStore<T extends object, S>(store: Store<T>, selector: (s: T) 
 }
 
 export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text' | 'anchor' | 'pen';
-export type RightTab = 'effects' | 'controls' | 'layer';
+export type RightTab = 'effects' | 'library' | 'controls' | 'layer';
 export type Quality = 'auto' | 1 | 0.5 | 0.33 | 0.25;
 
 export type Dialog =

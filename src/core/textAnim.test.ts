@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createAnimator } from './factory';
 import { setKeyAt } from './interp';
-import { computeCharStyles, coverage, evalAnimator, mixColor, permutation, unitIndices, type AnimValues } from './textAnim';
+import { computeCharStyles, coverage, evalAnimator, mixColor, permutation, RAMP_EASES, unitIndices, type AnimValues } from './textAnim';
 
 const vals = (over: Partial<AnimValues> = {}): AnimValues => ({
-  start: 0, end: 100, offset: 0, smooth: 100, units: 0, shape: 0, random: false, seed: 1,
+  start: 0, end: 100, offset: 0, smooth: 100, units: 0, shape: 0, ease: 0, random: false, seed: 1,
   position: [0, 0], scale: [100, 100], rotation: 0, opacity: 100, tracking: 0, colorMix: 0, color: [255, 0, 0], ...over,
 });
 
@@ -96,5 +96,29 @@ describe('animator properties', () => {
     expect(createAnimator('p', 'position').props.position.value).toEqual([0, -60]);
     expect(createAnimator('s', 'scale').props.scale.value).toEqual([0, 0]);
     expect(createAnimator('c', 'color').props.colorMix.value).toBe(100);
+  });
+});
+
+describe('ramp easing', () => {
+  it('every ramp curve maps 0 to 0 and 1 to 1, so letters start and end in the right place', () => {
+    for (const f of RAMP_EASES) {
+      expect(f(0)).toBeCloseTo(0, 6);
+      expect(f(1)).toBeCloseTo(1, 6);
+    }
+  });
+  it('the default (linear) ramp still produces evenly graded coverage', () => {
+    const n = 11;
+    const c = Array.from({ length: n }, (_, i) => coverage(i, n, vals({ shape: 1 })));
+    for (let i = 1; i < n; i++) expect(c[i] - c[i - 1]).toBeCloseTo(1 / n, 6);
+  });
+  it('back easing overshoots past the resting state', () => {
+    const n = 41;
+    const c = Array.from({ length: n }, (_, i) => coverage(i, n, vals({ shape: 1, ease: 4 })));
+    expect(Math.min(...c)).toBeLessThan(-0.02); // coverage dips below 0 = the letter overshoots its destination
+  });
+  it('older animators without the ease property still evaluate', () => {
+    const a = createAnimator('A');
+    delete (a.props as Record<string, unknown>).ease;
+    expect(evalAnimator(a, 0).ease).toBe(0);
   });
 });

@@ -1,5 +1,4 @@
 import { uid } from './ids';
-import { EASY_EASE, evalVec, setKeyAt } from './interp';
 import { TRANSFORM_KEYS, type Layer, type Prop, type PropGroup } from './types';
 
 /** Every property on a layer: transform, content, then each effect's parameters. */
@@ -58,79 +57,6 @@ export function cloneLayer(layer: Layer): Layer {
   for (const a of copy.animators) a.id = uid('anim');
   return copy;
 }
-
-export interface Preset {
-  id: string;
-  name: string;
-  apply(layer: Layer, t: number, fps: number): void;
-}
-
-const tol = (fps: number) => 0.25 / fps;
-
-export const PRESETS: Preset[] = [
-  {
-    id: 'fadeIn',
-    name: 'Fade In',
-    apply(l, t, fps) {
-      setKeyAt(l.transform.opacity, t, 0, tol(fps), EASY_EASE);
-      setKeyAt(l.transform.opacity, t + 0.5, 100, tol(fps));
-    },
-  },
-  {
-    id: 'fadeOut',
-    name: 'Fade Out',
-    apply(l, t, fps) {
-      setKeyAt(l.transform.opacity, t, 100, tol(fps), EASY_EASE);
-      setKeyAt(l.transform.opacity, t + 0.5, 0, tol(fps));
-    },
-  },
-  {
-    id: 'slideIn',
-    name: 'Slide In From Left',
-    apply(l, t, fps) {
-      const [x, y] = evalVec(l.transform.position, t);
-      setKeyAt(l.transform.position, t, [x - 700, y], tol(fps), EASY_EASE);
-      setKeyAt(l.transform.position, t + 0.7, [x, y], tol(fps));
-    },
-  },
-  {
-    id: 'popIn',
-    name: 'Pop In',
-    apply(l, t, fps) {
-      const [sx, sy] = evalVec(l.transform.scale, t);
-      setKeyAt(l.transform.scale, t, [0, 0], tol(fps), EASY_EASE);
-      setKeyAt(l.transform.scale, t + 0.35, [sx * 1.15, sy * 1.15], tol(fps), EASY_EASE);
-      setKeyAt(l.transform.scale, t + 0.55, [sx, sy], tol(fps));
-    },
-  },
-  {
-    id: 'spin',
-    name: 'Spin (360°)',
-    apply(l, t, fps) {
-      const r = l.transform.rotation.keys.length ? 0 : (l.transform.rotation.value as number);
-      setKeyAt(l.transform.rotation, t, r, tol(fps));
-      setKeyAt(l.transform.rotation, t + 2, r + 360, tol(fps));
-    },
-  },
-  {
-    id: 'pulse',
-    name: 'Pulse (looping)',
-    apply(l, t, fps) {
-      const [sx, sy] = evalVec(l.transform.scale, t);
-      setKeyAt(l.transform.scale, t, [sx, sy], tol(fps), EASY_EASE);
-      setKeyAt(l.transform.scale, t + 0.5, [sx * 1.12, sy * 1.12], tol(fps), EASY_EASE);
-      setKeyAt(l.transform.scale, t + 1, [sx, sy], tol(fps));
-      l.transform.scale.loop = 'cycle';
-    },
-  },
-  {
-    id: 'wiggle',
-    name: 'Wiggle Position',
-    apply(l) {
-      l.transform.position.wiggle = { freq: 2, amp: 30, seed: Math.floor(Math.random() * 1000) };
-    },
-  },
-];
 
 export interface FoundKey {
   layer: Layer;

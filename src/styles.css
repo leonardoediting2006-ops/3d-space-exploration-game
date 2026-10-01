@@ -205,7 +205,7 @@ input[type='color'] {
 }
 .top {
   display: grid;
-  grid-template-columns: 250px minmax(0, 1fr) 300px;
+  grid-template-columns: 250px minmax(0, 1fr) 340px;
   gap: 4px;
   min-height: 0;
   padding-top: 4px;
@@ -1428,4 +1428,115 @@ kbd {
 }
 .gp-label {
   color: var(--dim);
+}
+
+/* ---------------------------------------------------------------- library */
+.library .search {
+  margin-bottom: 6px;
+}
+.lib-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.lib-cats button {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 12px;
+}
+.lib-cats small {
+  opacity: 0.6;
+  margin-left: 2px;
+}
+.lib-hint {
+  padding: 2px 2px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.library h3.lib-cat-title {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.library h4 {
+  margin: 12px 0 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.tpl-grid.easing {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.tpl-grid.gradient {
+  grid-template-columns: repeat(3, 1fr);
+}
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px;
+  border: 1px solid transparent;
+}
+.tpl-card:hover {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+.tpl-card:active {
+  border-color: var(--accent);
+}
+.tpl-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  background: #16171c;
+  display: block;
+}
+.tpl-thumb.failed {
+  opacity: 0.3;
+}
+.tpl-name {
+  font-size: 11px;
+  color: #c4c7d0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tpl-card.ease {
+  align-items: center;
+  background: #15161a;
+}
+.tpl-card.ease .tpl-name {
+  font-size: 9.5px;
+  max-width: 100%;
+}
+.swatch-fill {
+  position: relative;
+  height: 34px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.swatch-fill .bg-btn {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  opacity: 0;
+  padding: 0 5px;
+  font-size: 9.5px;
+  line-height: 14px;
+}
+.tpl-card.swatch:hover .bg-btn {
+  opacity: 1;
 }

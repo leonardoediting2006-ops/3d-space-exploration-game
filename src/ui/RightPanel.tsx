@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react';
 import { EFFECTS, getEffectDef } from '../core/effectDefs';
-import { PRESETS } from '../core/props';
 import type { AnimatorKind } from '../core/factory';
 import type { Layer, Prop, PropGroup } from '../core/types';
 import {
   addEffect,
   addTextAnimator,
-  applyPreset,
   moveEffect,
   openComp,
   removeEffect,
@@ -16,12 +14,14 @@ import {
 } from '../state/actions';
 import { appStore, toast, useActiveComp, useApp, type RightTab } from '../state/store';
 import { NumberField } from './fields';
+import { LibraryPanel } from './LibraryPanel';
 import { PropEditor } from './PropEditor';
 
 export function RightPanel() {
   const tab = useApp((s) => s.rightTab);
   const tabs: { id: RightTab; label: string }[] = [
     { id: 'effects', label: 'Effects' },
+    { id: 'library', label: 'Library' },
     { id: 'controls', label: 'Controls' },
     { id: 'layer', label: 'Layer' },
   ];
@@ -36,6 +36,7 @@ export function RightPanel() {
       </div>
       <div className="panel-body">
         {tab === 'effects' && <EffectsTab />}
+        {tab === 'library' && <LibraryPanel />}
         {tab === 'controls' && <ControlsTab />}
         {tab === 'layer' && <LayerTab />}
       </div>
@@ -75,25 +76,9 @@ function EffectsTab() {
           ))}
         </section>
       ))}
-      {(!needle || 'animation presets'.includes(needle) || PRESETS.some((p) => p.name.toLowerCase().includes(needle))) && (
-        <section>
-          <h4>Animation Presets</h4>
-          {PRESETS.filter((p) => !needle || p.name.toLowerCase().includes(needle) || 'animation presets'.includes(needle)).map((p) => (
-            <div
-              key={p.id}
-              className="fx-item"
-              onDoubleClick={() => (selection.length ? applyPreset(selection, p.id) : toast('Select a layer first.'))}
-              title="Applies keyframes at the playhead"
-              data-testid={`preset-${p.id}`}
-            >
-              <span>{p.name}</span>
-              <button className="mini" onClick={() => (selection.length ? applyPreset(selection, p.id) : toast('Select a layer first.'))}>
-                Apply
-              </button>
-            </div>
-          ))}
-        </section>
-      )}
+      <div className="hint">
+        Looking for animation presets, text styles, gradients or easing curves? They live in the <button className="mini" onClick={() => appStore.set({ rightTab: 'library' })}>Library</button> tab.
+      </div>
     </div>
   );
 }
@@ -182,8 +167,9 @@ function LayerTab() {
             </select>
           </div>
           <div className="row">
-            <label>Stroke</label>
-            <label className="chk"><input type="checkbox" checked={d.stroke} onChange={(e) => updateLayerData(layer.id, { stroke: e.target.checked })} /> Enable</label>
+            <label>Paint</label>
+            <label className="chk"><input type="checkbox" checked={d.fill !== false} onChange={(e) => updateLayerData(layer.id, { fill: e.target.checked })} /> Fill</label>
+            <label className="chk"><input type="checkbox" checked={d.stroke} onChange={(e) => updateLayerData(layer.id, { stroke: e.target.checked })} /> Stroke</label>
           </div>
         </section>
       )}

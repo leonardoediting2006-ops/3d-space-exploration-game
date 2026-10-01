@@ -272,6 +272,7 @@ export function createAnimator(name: string, kind: AnimatorKind = 'blank'): Text
     smooth: makeProp('number', 'Smoothness', 100, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
     units: makeProp('number', 'Based On', 0, { options: ['Characters', 'Words', 'Lines'] }),
     shape: makeProp('number', 'Shape', 0, { options: ['Square', 'Ramp Up', 'Ramp Down', 'Triangle', 'Round', 'Smooth'] }),
+    ease: makeProp('number', 'Ramp Easing', 0, { options: ['Linear', 'Ease Out', 'Ease In', 'Ease In Out', 'Back (overshoot)', 'Elastic', 'Bounce'] }),
     random: makeProp('number', 'Randomize Order', 0, { options: ['Off', 'On'] }),
     seed: makeProp('number', 'Random Seed', 1, { min: 0, max: 9999, step: 1, decimals: 0 }),
     position: makeProp('vec2', 'Position', [0, 0], { unit: 'px', step: 1, decimals: 1 }),

@@ -20,7 +20,7 @@ import type { AnimatorKind } from '../core/factory';
 import { baseValue, evalProp, NAMED_EASE_REVERSE, setAnimated, setKeyAt, sortKeys } from '../core/interp';
 import { clamp } from '../core/math';
 import { insertVertex, removeVertex } from '../core/path';
-import { cloneLayer, findKey, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
+import { cloneLayer, findKey, layerProps, layerPropEntries, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
 import { snapToFrame } from '../core/time';
 import type {
@@ -611,17 +611,6 @@ export function setPropLink(layerId: string, group: PropGroup, key: string, link
     const l = p.comps[compId].layers.find((x) => x.id === layerId);
     const prop = l && resolveProp(l, group, key);
     if (prop) prop.link = link;
-  });
-}
-
-export function applyPreset(layerIds: string[], presetId: string): void {
-  const preset = PRESETS.find((x) => x.id === presetId);
-  if (!preset || !layerIds.length) return;
-  const compId = S().activeCompId;
-  const t = now();
-  commit((p) => {
-    const comp = p.comps[compId];
-    for (const l of comp.layers) if (layerIds.includes(l.id)) preset.apply(l, t, comp.fps);
   });
 }
 

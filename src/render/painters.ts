@@ -169,8 +169,10 @@ function paintTextAnimated(ctx: CanvasRenderingContext2D, layer: Layer, t: numbe
         ctx.strokeStyle = cssColor(stroke);
         ctx.strokeText(ch, -ws[k] / 2, baseline - pivotY);
       }
-      ctx.fillStyle = cssColor(mixColor(fill, st.mix));
-      ctx.fillText(ch, -ws[k] / 2, baseline - pivotY);
+      if (d.fill !== false) {
+        ctx.fillStyle = cssColor(mixColor(fill, st.mix));
+        ctx.fillText(ch, -ws[k] / 2, baseline - pivotY);
+      }
       ctx.restore();
     }
     ci += line.length + 1;
@@ -197,8 +199,10 @@ function paintText(ctx: CanvasRenderingContext2D, layer: Layer, t: number): void
       ctx.strokeStyle = cssColor(evalColor(layer.content.strokeColor, t));
       ctx.strokeText(line, 0, i * lh);
     }
-    ctx.fillStyle = fill;
-    ctx.fillText(line, 0, i * lh);
+    if (d.fill !== false) {
+      ctx.fillStyle = fill;
+      ctx.fillText(line, 0, i * lh);
+    }
   });
 }
 

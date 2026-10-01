@@ -140,6 +140,8 @@ export type LayerData =
       italic: boolean;
       align: 'left' | 'center' | 'right';
       stroke: boolean;
+      /** Draw the fill (default true). Turn it off for outline-only type. */
+      fill?: boolean;
     }
   | { type: 'image'; assetId: string }
   | { type: 'precomp'; compId: string };

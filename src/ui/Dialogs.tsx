@@ -376,7 +376,7 @@ function AboutDialog() {
       </p>
       <p className="note">
         Compositions, layers, keyframes with bezier easing and curved motion paths, wiggle and loop, parenting, blend modes, track mattes, masks, pen-drawn shapes,
-        adjustment layers, effects, precomps, motion blur, and frame-accurate export — all rendered locally on your machine. Projects save as plain JSON files.
+        adjustment layers, effects, text animators, gradients, a 330-template library, precomps, motion blur, and frame-accurate export — all rendered locally on your machine. Projects save as plain JSON files.
       </p>
       <p className="note">Limitations: 2D only (no 3D layers or cameras), no audio, no video footage import, and no expressions beyond wiggle and loop.</p>
       <div className="modal-actions">
