@@ -15,6 +15,12 @@ export interface Keyframe {
   t: number;
   v: PropValue;
   ease: Ease;
+  /**
+   * Spatial (motion path) tangents for vec2 properties such as Position, as offsets from the
+   * keyframe's value. Zero or absent means a straight line to the neighbouring keyframe.
+   */
+  sIn?: [number, number];
+  sOut?: [number, number];
 }
 
 export interface Wiggle {

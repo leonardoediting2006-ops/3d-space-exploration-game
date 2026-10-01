@@ -18,7 +18,7 @@ import { uid } from '../core/ids';
 import { baseValue, evalProp, setAnimated, setKeyAt, sortKeys } from '../core/interp';
 import { clamp } from '../core/math';
 import { insertVertex, removeVertex } from '../core/path';
-import { cloneLayer, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
+import { cloneLayer, findKey, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
 import { snapToFrame } from '../core/time';
 import type {
@@ -1008,12 +1008,18 @@ export function timeReverseKeys(ids: string[]): void {
         if (picked.length < 2) continue;
         const t0 = picked[0].t;
         const t1 = picked[picked.length - 1].t;
-        const snapshot = picked.map((k) => ({ t: k.t, v: k.v, ease: k.ease }));
+        const snapshot = picked.map((k) => ({ t: k.t, v: k.v, ease: k.ease, sIn: k.sIn, sOut: k.sOut }));
         const m = picked.length;
         picked.forEach((k, j) => {
           const src = snapshot[m - 1 - j];
           k.t = t0 + t1 - src.t;
           k.v = src.v;
+          // a reversed path swaps which tangent arrives and which leaves
+          const [sIn, sOut] = [src.sOut, src.sIn];
+          if (sIn) k.sIn = sIn;
+          else delete k.sIn;
+          if (sOut) k.sOut = sOut;
+          else delete k.sOut;
           const seg = snapshot[m - 2 - j]?.ease;
           if (seg === undefined) k.ease = 'linear';
           else if (seg === 'hold' || seg === 'linear') k.ease = seg;
@@ -1107,4 +1113,59 @@ export function removePathVertex(layerId: string, group: PropGroup, key: string,
     if (prop) mapPath(prop, (v) => removeVertex(v, index));
   });
   appStore.set({ selVertex: null });
+}
+
+/* ------------------------------------------------------------------ spatial motion paths */
+
+/** Auto-bezier: curve the motion path smoothly through the selected position keyframes. */
+export function smoothMotionPath(ids: string[]): void {
+  const sel = new Set(ids);
+  const compId = S().activeCompId;
+  commit((p) => {
+    for (const l of p.comps[compId].layers) {
+      for (const prop of layerProps(l)) {
+        if (prop.kind !== 'vec2' || prop.keys.length < 3) continue;
+        const ks = prop.keys;
+        ks.forEach((k, i) => {
+          if (!sel.has(k.id) || i === 0 || i === ks.length - 1) return;
+          const a = ks[i - 1].v as number[];
+          const b = ks[i + 1].v as number[];
+          const tx = (b[0] - a[0]) / 6;
+          const ty = (b[1] - a[1]) / 6;
+          k.sIn = [-tx, -ty];
+          k.sOut = [tx, ty];
+        });
+      }
+    }
+  });
+}
+
+export function clearMotionPathCurves(ids: string[]): void {
+  const sel = new Set(ids);
+  const compId = S().activeCompId;
+  commit((p) => {
+    for (const l of p.comps[compId].layers) for (const prop of layerProps(l)) for (const k of prop.keys) if (sel.has(k.id)) {
+      delete k.sIn;
+      delete k.sOut;
+    }
+  });
+}
+
+/** Set a keyframe's value (and optionally its motion-path tangents) without changing its time. */
+export function setKeyframeSpatial(keyId: string, patch: { v?: Vec2; sIn?: Vec2 | null; sOut?: Vec2 | null }): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const found = findKey(p.comps[compId].layers, keyId);
+    if (!found) return;
+    const k = found.prop.keys[found.index];
+    if (patch.v) k.v = [...patch.v];
+    if (patch.sIn !== undefined) {
+      if (patch.sIn) k.sIn = [...patch.sIn];
+      else delete k.sIn;
+    }
+    if (patch.sOut !== undefined) {
+      if (patch.sOut) k.sOut = [...patch.sOut];
+      else delete k.sOut;
+    }
+  });
 }

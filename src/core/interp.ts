@@ -73,6 +73,64 @@ function loopTime(keys: Keyframe[], t: number, mode: 'cycle' | 'pingpong'): numb
   return t0 + (k % 2 === 0 ? r : d - r);
 }
 
+/* ---- spatial interpolation (curved motion paths) ---- */
+
+const LUT_STEPS = 24;
+interface SpatialSegment {
+  sig: string;
+  to: Keyframe;
+  pts: [number, number, number, number, number, number, number, number];
+  cum: Float64Array; // cumulative arc length at t = i / LUT_STEPS
+}
+const spatialCache = new WeakMap<Keyframe, SpatialSegment>();
+
+function bez(p: SpatialSegment['pts'], t: number): [number, number] {
+  const m = 1 - t;
+  const a = m * m * m;
+  const b = 3 * m * m * t;
+  const c = 3 * m * t * t;
+  const d = t * t * t;
+  return [a * p[0] + b * p[2] + c * p[4] + d * p[6], a * p[1] + b * p[3] + c * p[5] + d * p[7]];
+}
+
+function spatialSegment(k0: Keyframe, k1: Keyframe): SpatialSegment | null {
+  const a = k0.v as number[];
+  const b = k1.v as number[];
+  const so = k0.sOut;
+  const si = k1.sIn;
+  if (!(so && (so[0] !== 0 || so[1] !== 0)) && !(si && (si[0] !== 0 || si[1] !== 0))) return null;
+  const pts: SpatialSegment['pts'] = [a[0], a[1], a[0] + (so?.[0] ?? 0), a[1] + (so?.[1] ?? 0), b[0] + (si?.[0] ?? 0), b[1] + (si?.[1] ?? 0), b[0], b[1]];
+  const sig = pts.join(',');
+  const hit = spatialCache.get(k0);
+  if (hit && hit.to === k1 && hit.sig === sig) return hit;
+  const cum = new Float64Array(LUT_STEPS + 1);
+  let prev = bez(pts, 0);
+  for (let i = 1; i <= LUT_STEPS; i++) {
+    const q = bez(pts, i / LUT_STEPS);
+    cum[i] = cum[i - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1]);
+    prev = q;
+  }
+  const seg: SpatialSegment = { sig, to: k1, pts, cum };
+  spatialCache.set(k0, seg);
+  return seg;
+}
+
+/** Point a fraction `p` of the way along the curve's length (so linear easing means constant speed). */
+function alongSpatial(seg: SpatialSegment, p: number): [number, number] {
+  const total = seg.cum[LUT_STEPS];
+  const target = Math.min(1, Math.max(0, p)) * total;
+  let lo = 0;
+  let hi = LUT_STEPS;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (seg.cum[mid] <= target) lo = mid;
+    else hi = mid;
+  }
+  const span = seg.cum[hi] - seg.cum[lo];
+  const f = span > 0 ? (target - seg.cum[lo]) / span : 0;
+  return bez(seg.pts, (lo + f) / LUT_STEPS);
+}
+
 /** The keyframed (or static) value, ignoring wiggle. */
 export function baseValue(prop: Prop, t: number): PropValue {
   const keys = prop.keys;
@@ -94,7 +152,12 @@ export function baseValue(prop: Prop, t: number): PropValue {
   const k1 = keys[hi];
   if (k0.ease === 'hold') return k0.v;
   const u = (tt - k0.t) / (k1.t - k0.t);
-  return lerpValue(k0.v, k1.v, easeProgress(k0.ease, u));
+  const progress = easeProgress(k0.ease, u);
+  if (prop.kind === 'vec2') {
+    const seg = spatialSegment(k0, k1);
+    if (seg) return alongSpatial(seg, progress);
+  }
+  return lerpValue(k0.v, k1.v, progress);
 }
 
 /** Full value of a property at comp time t, including wiggle and clamping. */

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPoi
 import { baseValue, evalProp } from '../core/interp';
 import { apply, applyVec, clamp, invert, radToDeg, type Mat } from '../core/math';
 import { corner, ellipsePath, fromPoints, isSmooth, nearestOnPath, rectPath, smoothVertex, toPoints, type PathPt } from '../core/path';
-import type { Comp, Layer, Project, PropGroup, Vec2 } from '../core/types';
+import type { Comp, Keyframe, Layer, Project, PropGroup, Vec2 } from '../core/types';
 import { renderComp } from '../render/renderer';
 import {
   hitTestLayer,
@@ -20,8 +20,10 @@ import {
   addText,
   insertPathVertex,
   deleteLayers,
+  selectKeys,
   selectLayers,
   setAnchorKeepingPlace,
+  setKeyframeSpatial,
   setManyProps,
   toggleLayerSelected,
   updateLayerData,
@@ -139,6 +141,42 @@ function pathToLocal(comp: Comp, layer: Layer, t: number, v: number[]): number[]
   );
 }
 
+interface MotionPoint {
+  key: Keyframe;
+  v: Vec2;
+  i: Vec2 | null;
+  o: Vec2 | null;
+}
+
+/** The layer's Position motion path in composition space (it lives in the parent's space). */
+function motionGizmo(comp: Comp, layer: Layer, t: number): { P: Mat; pts: MotionPoint[] } | null {
+  const keys = layer.transform.position.keys;
+  if (keys.length < 2) return null;
+  const P = parentWorld(layer, t, layerMap(comp));
+  const pts = keys.map((key) => {
+    const v = key.v as number[];
+    const map = (dx: number, dy: number): Vec2 => apply(P, [v[0] + dx, v[1] + dy]);
+    return {
+      key,
+      v: map(0, 0),
+      i: key.sIn && (key.sIn[0] !== 0 || key.sIn[1] !== 0) ? map(key.sIn[0], key.sIn[1]) : null,
+      o: key.sOut && (key.sOut[0] !== 0 || key.sOut[1] !== 0) ? map(key.sOut[0], key.sOut[1]) : null,
+    };
+  });
+  return { P, pts };
+}
+
+function motionHit(g: { pts: MotionPoint[] }, selKeys: string[], p: Vec2, r: number): { part: 'key' | 'in' | 'out'; key: Keyframe } | null {
+  const near = (a: Vec2) => Math.hypot(a[0] - p[0], a[1] - p[1]) <= r;
+  for (const m of g.pts) {
+    if (!selKeys.includes(m.key.id)) continue;
+    if (m.o && near(m.o)) return { part: 'out', key: m.key };
+    if (m.i && near(m.i)) return { part: 'in', key: m.key };
+  }
+  for (const m of g.pts) if (near(m.v)) return { part: 'key', key: m.key };
+  return null;
+}
+
 let penActive = false;
 /** True while a pen path is being drawn, so global shortcuts leave Enter / Esc / Backspace alone. */
 export const isPenActive = (): boolean => penActive;
@@ -152,6 +190,8 @@ type Drag =
   | { kind: 'create'; start: Vec2; cur: Vec2 }
   | { kind: 'anchor'; id: string; a0: Vec2; pos0: Vec2; W0: Mat; lin: Mat }
   | { kind: 'pen' }
+  | { kind: 'mkey'; keyId: string; inv: Mat; grab: Vec2; v0: Vec2; pull: boolean }
+  | { kind: 'mhandle'; keyId: string; which: 'in' | 'out'; inv: Mat; v0: Vec2; mirror: boolean }
   | { kind: 'vertex'; layerId: string; group: PropGroup; key: string; index: number; part: 'v' | 'in' | 'out'; v0: number[]; inv: Mat; grab: Vec2; smooth: boolean };
 
 interface EditingText {
@@ -242,7 +282,7 @@ export function Viewer() {
       lastKey.current = renderKey;
       renderComp(canvas, s.project, c, t, { scale: sc, transparent: s.checkerboard, mbSamples: 6 });
     }
-    const ovKey = [...renderKey, s.selection, zoom, vp.w, vp.h, s.tool, s.safeMargins, dragTick.current, s.activeMask, s.selVertex];
+    const ovKey = [...renderKey, s.selection, zoom, vp.w, vp.h, s.tool, s.safeMargins, dragTick.current, s.activeMask, s.selVertex, s.selKeys];
     if (ovKey.some((v, i) => v !== lastOverlayKey.current[i])) {
       lastOverlayKey.current = ovKey;
       drawOverlay(ov, s.project, c, t, s.selection, s.safeMargins);
@@ -368,6 +408,55 @@ export function Viewer() {
         g.fill();
         g.stroke();
       });
+    }
+    if (sel.length === 1 && tool === 'select') {
+      const L = c.layers.find((l) => l.id === sel[0]);
+      const mg = L && motionGizmo(c, L, t);
+      if (mg) {
+        g.strokeStyle = 'rgba(255,255,255,0.75)';
+        g.lineWidth = 1.25;
+        g.setLineDash([4, 4]);
+        g.beginPath();
+        mg.pts.forEach((m, k) => {
+          if (k === 0) return g.moveTo(m.v[0] * zoom, m.v[1] * zoom);
+          const prev = mg.pts[k - 1];
+          if (prev.o || m.i) {
+            const c1 = prev.o ?? prev.v;
+            const c2 = m.i ?? m.v;
+            g.bezierCurveTo(c1[0] * zoom, c1[1] * zoom, c2[0] * zoom, c2[1] * zoom, m.v[0] * zoom, m.v[1] * zoom);
+          } else g.lineTo(m.v[0] * zoom, m.v[1] * zoom);
+        });
+        g.stroke();
+        g.setLineDash([]);
+        for (const m of mg.pts) {
+          const isSel = st.selKeys.includes(m.key.id);
+          if (isSel) {
+            g.strokeStyle = 'rgba(255,255,255,0.7)';
+            g.lineWidth = 1;
+            g.beginPath();
+            for (const h of [m.i, m.o]) {
+              if (!h) continue;
+              g.moveTo(m.v[0] * zoom, m.v[1] * zoom);
+              g.lineTo(h[0] * zoom, h[1] * zoom);
+            }
+            g.stroke();
+            g.fillStyle = '#ffd24a';
+            for (const h of [m.i, m.o]) {
+              if (!h) continue;
+              g.beginPath();
+              g.arc(h[0] * zoom, h[1] * zoom, 4, 0, Math.PI * 2);
+              g.fill();
+            }
+          }
+          g.fillStyle = isSel ? '#ffd24a' : '#fff';
+          g.strokeStyle = '#1b1c1f';
+          g.lineWidth = 1.5;
+          g.beginPath();
+          g.rect(m.v[0] * zoom - 4, m.v[1] * zoom - 4, 8, 8);
+          g.fill();
+          g.stroke();
+        }
+      }
     }
     const pp = pen.current;
     if (tool === 'pen' && pp.pts.length) {
@@ -575,7 +664,26 @@ export function Viewer() {
       return;
     }
 
-    // select tool: path vertices and tangents take priority over the layer's transform handles
+    // select tool: motion-path keyframes first, then path vertices, then the layer's transform handles
+    const selLayer = s.selection.length === 1 ? c.layers.find((l) => l.id === s.selection[0]) : undefined;
+    const mg = selLayer && !selLayer.locked ? motionGizmo(c, selLayer, t) : null;
+    const mh = mg ? motionHit(mg, s.selKeys, p, 8 / zoom) : null;
+    if (mg && mh) {
+      const inv = invert(mg.P);
+      if (inv) {
+        const v0 = mh.key.v as Vec2;
+        selectKeys([mh.key.id]);
+        el.setPointerCapture(e.pointerId);
+        beginGesture();
+        if (mh.part === 'key') {
+          const q = apply(inv, p);
+          drag.current = { kind: 'mkey', keyId: mh.key.id, inv, grab: [v0[0] - q[0], v0[1] - q[1]], v0: [v0[0], v0[1]], pull: e.altKey };
+        } else {
+          drag.current = { kind: 'mhandle', keyId: mh.key.id, which: mh.part, inv, v0: [v0[0], v0[1]], mirror: !e.altKey };
+        }
+        return;
+      }
+    }
     const pt = editTarget(c, s.selection, s.activeMask);
     const pg = pt && pathGizmo(pt, c, t);
     const ph = pt && pg ? pathHit(pg, s.selVertex, p, 8 / zoom) : null;
@@ -691,6 +799,24 @@ export function Viewer() {
       pen.current.cursor = p;
       dragTick.current++;
       schedule();
+      return;
+    }
+    if (d.kind === 'mkey') {
+      const q = apply(d.inv, p);
+      if (d.pull) {
+        const out: Vec2 = [q[0] - d.v0[0], q[1] - d.v0[1]];
+        setKeyframeSpatial(d.keyId, { sOut: out, sIn: [-out[0], -out[1]] });
+      } else {
+        setKeyframeSpatial(d.keyId, { v: [Math.round((q[0] + d.grab[0]) * 100) / 100, Math.round((q[1] + d.grab[1]) * 100) / 100] });
+      }
+      return;
+    }
+    if (d.kind === 'mhandle') {
+      const q = apply(d.inv, p);
+      const off: Vec2 = [q[0] - d.v0[0], q[1] - d.v0[1]];
+      const opp: Vec2 = [-off[0], -off[1]];
+      if (d.which === 'out') setKeyframeSpatial(d.keyId, d.mirror ? { sOut: off, sIn: opp } : { sOut: off });
+      else setKeyframeSpatial(d.keyId, d.mirror ? { sIn: off, sOut: opp } : { sIn: off });
       return;
     }
     if (d.kind === 'vertex') {
@@ -824,7 +950,7 @@ export function Viewer() {
       schedule();
       return;
     }
-    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor' || d.kind === 'vertex') endGesture();
+    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor' || d.kind === 'vertex' || d.kind === 'mkey' || d.kind === 'mhandle') endGesture();
     force((n) => n + 1);
   };
 

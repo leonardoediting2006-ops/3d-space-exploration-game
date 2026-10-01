@@ -63,6 +63,9 @@ function checkProp(p: unknown, what: string): Prop {
     const e = k.ease;
     const ok = e === 'linear' || e === 'hold' || (Array.isArray(e) && e.length === 4 && e.every(isNum));
     if (!ok) fail(`${what} keyframe ease`);
+    for (const t of [k.sIn, k.sOut]) {
+      if (t !== undefined && !(Array.isArray(t) && t.length === 2 && t.every(isNum))) fail(`${what} keyframe motion-path tangent`);
+    }
   }
   if (p.wiggle !== undefined) {
     const w = p.wiggle;

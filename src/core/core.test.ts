@@ -130,3 +130,52 @@ describe('factories', () => {
     expect(createEffect('nope', { width: 1, height: 1 })).toBeNull();
   });
 });
+
+describe('motion paths', () => {
+  const twoKeys = (sOut?: [number, number], sIn?: [number, number]) => {
+    const p = makeProp('vec2', 'p', [0, 0]);
+    const a = setKeyAt(p, 0, [0, 0], 1e-4);
+    const b = setKeyAt(p, 1, [300, 0], 1e-4);
+    if (sOut) a.sOut = sOut;
+    if (sIn) b.sIn = sIn;
+    return p;
+  };
+
+  it('without tangents the path is a straight line', () => {
+    const p = twoKeys();
+    expect(baseValue(p, 0.5)).toEqual([150, 0]);
+  });
+
+  it('with tangents the path bows away from the straight line', () => {
+    const p = twoKeys([0, 100], [0, 100]);
+    const mid = baseValue(p, 0.5) as number[];
+    expect(mid[0]).toBeCloseTo(150, 0);
+    expect(mid[1]).toBeGreaterThan(50);
+    expect(baseValue(p, 0)).toEqual([0, 0]);
+    expect(baseValue(p, 1)).toEqual([300, 0]);
+  });
+
+  it('linear timing means constant speed along the curve (arc-length parametrised)', () => {
+    const p = twoKeys([0, 200], [-300, 0]); // an asymmetric curve: naive t-parametrisation would speed up and slow down
+    const pts: number[][] = [];
+    for (let i = 0; i <= 40; i++) pts.push(baseValue(p, i / 40) as number[]);
+    const steps = pts.slice(1).map((q, i) => Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]));
+    const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+    for (const s of steps) expect(Math.abs(s - mean) / mean).toBeLessThan(0.08);
+  });
+
+  it('editing a tangent in place invalidates the cached curve', () => {
+    const p = twoKeys([0, 100], [0, 100]);
+    const before = baseValue(p, 0.5) as number[];
+    p.keys[0].sOut = [0, 400];
+    const after = baseValue(p, 0.5) as number[];
+    expect(after[1]).toBeGreaterThan(before[1]);
+  });
+
+  it('non-position kinds ignore tangents', () => {
+    const p = makeProp('number', 'n', 0);
+    setKeyAt(p, 0, 0, 1e-4);
+    setKeyAt(p, 1, 10, 1e-4);
+    expect(baseValue(p, 0.5)).toBe(5);
+  });
+});

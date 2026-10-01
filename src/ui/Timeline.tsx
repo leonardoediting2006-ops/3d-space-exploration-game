@@ -18,6 +18,7 @@ import {
 } from '../core/types';
 import {
   applyKeyEase,
+  clearMotionPathCurves,
   deleteKeys,
   moveKeys,
   moveLayerToIndex,
@@ -35,6 +36,7 @@ import {
   setTime,
   setWiggle,
   setWorkArea,
+  smoothMotionPath,
   toggleKeyHere,
   toggleLayerSelected,
   timeReverseKeys,
@@ -263,6 +265,8 @@ export function Timeline() {
       { label: 'Linear', onClick: () => applyKeyEase(ids, 'linear') },
       { label: 'Hold', onClick: () => applyKeyEase(ids, 'hold') },
       { label: 'Edit Easing Curve…', onClick: () => setEasing({ keyId: k.id, x: e.clientX, y: e.clientY }) },
+      { label: 'Smooth Motion Path (Auto Bezier)', onClick: () => smoothMotionPath(ids) },
+      { label: 'Straighten Motion Path', onClick: () => clearMotionPathCurves(ids) },
       { label: 'Time-Reverse Keyframes', onClick: () => timeReverseKeys(ids) },
       { label: 'Delete Keyframe', onClick: () => deleteKeys(ids) },
     ]);
