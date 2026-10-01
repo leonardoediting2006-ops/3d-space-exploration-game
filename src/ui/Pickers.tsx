@@ -11,6 +11,12 @@ import { TemplateThumb } from './TemplateThumb';
 
 type LayerItem = Extract<LibraryItem, { template: unknown }>;
 
+/** The layer being edited, or every selected layer when it is part of a multi-selection. */
+const targetIds = (layer: Layer): string[] => {
+  const sel = appStore.get().selection;
+  return sel.length > 1 && sel.includes(layer.id) ? sel : [layer.id];
+};
+
 const PLACE: Record<AnimSlot, Placement> = { in: 'start', out: 'end', loop: 'start', emph: 'playhead' };
 
 const matches = (i: LibraryItem, needle: string) => !needle || i.name.toLowerCase().includes(needle) || i.group.toLowerCase().includes(needle);
@@ -62,7 +68,7 @@ export function AnimPicker({ layer, slot, anchor, onClose }: { layer: Layer; slo
               items={g.items}
               empty=""
               onPick={(item) => {
-                applyLayerTemplate(item, { layerIds: [layer.id], place: PLACE[slot] });
+                applyLayerTemplate(item, { layerIds: targetIds(layer), place: PLACE[slot] });
                 onClose();
               }}
             />
@@ -111,7 +117,7 @@ export function EffectPicker({ layer, anchor, onClose }: { layer: Layer; anchor:
                     key={e.type}
                     className="fx-pick"
                     onClick={() => {
-                      addEffect([layer.id], e.type);
+                      addEffect(targetIds(layer), e.type);
                       appStore.set({ rightTab: 'inspector' });
                       onClose();
                     }}
@@ -128,7 +134,7 @@ export function EffectPicker({ layer, anchor, onClose }: { layer: Layer; anchor:
             items={looks}
             empty="Nothing matches."
             onPick={(item) => {
-              applyLayerTemplate(item, { layerIds: [layer.id] });
+              applyLayerTemplate(item, { layerIds: targetIds(layer) });
               onClose();
             }}
           />

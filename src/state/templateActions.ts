@@ -1,4 +1,4 @@
-import { adoptNew, alignInstanceEnd, makeInstance, pruneInstances, removeInstance, setInstanceStart, snapshot } from '../core/anims';
+import { adoptNew, alignInstanceEnd, instanceSpan, makeInstance, pruneInstances, removeInstance, setInstanceStart, snapshot } from '../core/anims';
 import { createSolid, nextCount } from '../core/factory';
 import { setAnimated } from '../core/interp';
 import { createEffect } from '../core/effectDefs';
@@ -6,7 +6,7 @@ import type { Layer } from '../core/types';
 import { findLibraryItem, type LibraryItem } from '../templates';
 import { presetGradient } from '../templates/gradients';
 import { templateSlot, type LayerTemplate, type TemplateCtx } from '../templates/types';
-import { addText, applyEasePreset } from './actions';
+import { addText, applyEasePreset, previewRange } from './actions';
 import { activeComp, appStore, commit, timeStore, toast } from './store';
 
 const S = () => appStore.get();
@@ -79,7 +79,15 @@ export function applyLayerTemplate(item: Extract<LibraryItem, { template: unknow
       }
     }
   });
-  if (ok) toast(`Applied “${tpl.name}”`, { label: 'Customize', run: () => appStore.set({ rightTab: 'inspector' }) });
+  if (!ok) return;
+  toast(`Applied “${tpl.name}”`, { label: 'Customize', run: () => appStore.set({ rightTab: 'inspector' }) });
+  if (S().previewOnApply) {
+    // show what it does: play the first affected layer's new animation once
+    const layer = activeComp().layers.find((l) => idSet.has(l.id) && l.anims.some((a) => a.template === tpl.id));
+    const inst = layer?.anims.find((a) => a.template === tpl.id);
+    const span = layer && inst ? instanceSpan(layer, inst.id) : null;
+    if (span) previewRange(span.start, span.end);
+  }
 }
 
 export function insertScene(item: Extract<LibraryItem, { scene: unknown }>): void {
@@ -138,6 +146,36 @@ export function applyGradient(item: Extract<LibraryItem, { gradient: unknown }>,
   if (runTemplate(item.name, (ctx) => {
     for (const l of ctx.comp.layers) if (set.has(l.id)) setGradientFill(l, ctx, value);
   })) toast(`Applied “${item.name}” gradient`);
+}
+
+export const LIB_MIME = 'application/x-keyframe-template';
+
+/** Where a dropped animation should land: arrivals at the layer's start, exits at its end. */
+export function placementFor(tpl: LayerTemplate): Placement {
+  const slot = templateSlot(tpl);
+  return slot === 'in' || slot === 'loop' ? 'start' : slot === 'out' ? 'end' : 'playhead';
+}
+
+/**
+ * A template dropped on a specific layer (from the Library onto the viewer or the timeline).
+ * Layer templates go to that layer, with entrances and exits placed at the layer's start and end;
+ * a gradient fills it. Scenes and curves ignore the target.
+ */
+export function dropLibraryItem(item: LibraryItem, layerId: string | null): void {
+  if ('template' in item) {
+    if (!layerId) return void toast('Drop it on a layer.');
+    applyLayerTemplate(item, { layerIds: [layerId], place: placementFor(item.template) });
+    return;
+  }
+  if (item.category === 'gradient') {
+    if (layerId) {
+      appStore.set({ selection: [layerId], selKeys: [] });
+      return applyGradient(item);
+    }
+    return applyGradient(item, 'background');
+  }
+  if (item.category === 'scene') return insertScene(item);
+  toast('Easing curves apply to selected keyframes: pick keyframes, then click the curve.');
 }
 
 export function applyLibraryItem(item: LibraryItem): void {

@@ -197,6 +197,7 @@ export function installShortcuts(): () => void {
       }
     }
 
+    if (e.key === '?') return openDialog({ kind: 'shortcuts' });
     if (e.altKey) return;
     if (key === 'j') return goToKeyframe(-1);
     if (key === 'k') return goToKeyframe(1);

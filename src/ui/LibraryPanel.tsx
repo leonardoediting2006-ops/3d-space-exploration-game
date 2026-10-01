@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { gradientCss } from '../core/gradient';
 import type { Layer } from '../core/types';
 import { toggleFavorite, useFavorites } from '../state/favorites';
-import { applyGradient, applyLibraryItem } from '../state/templateActions';
-import { useActiveComp, useApp } from '../state/store';
+import { applyGradient, applyLibraryItem, LIB_MIME } from '../state/templateActions';
+import { appStore, useActiveComp, useApp } from '../state/store';
 import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, findLibraryItem, type LibraryItem } from '../templates';
 import { presetGradient } from '../templates/gradients';
 import { templateSource, type LibraryCategory } from '../templates/types';
@@ -18,7 +18,7 @@ const HINTS: Record<LibraryCategory, string> = {
   textAnim: 'Pick one, then fine-tune timing, strength and easing under Inspector → Animate. Hover a card to preview.',
   gradient: 'Click to fill the selected layers with a gradient, or add a gradient background. “BG” always adds a background.',
   easing: 'Applies to the selected keyframes, or every keyframe on the selected layers if none are selected.',
-  motion: 'Plays from the playhead on the selected layers. Retime it afterwards under Inspector → Animate.',
+  motion: 'Click to play from the playhead on the selected layers, or drag onto a layer to place it at its start or end. Retime it afterwards under Inspector → Animate.',
   effect: 'One-click looks built from effects. Tweak every setting afterwards in the Inspector.',
   scene: 'Ready-made layers inserted at the top of the stack, starting at the playhead.',
 };
@@ -46,11 +46,20 @@ function Star({ id }: { id: string }) {
   );
 }
 
+/** Make a card draggable so it can be dropped on a layer in the viewer or the timeline. */
+const dragProps = (item: LibraryItem) => ({
+  draggable: true,
+  onDragStart: (e: React.DragEvent) => {
+    e.dataTransfer.setData(LIB_MIME, item.id);
+    e.dataTransfer.effectAllowed = 'copy';
+  },
+});
+
 function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
   if (item.category === 'gradient') {
     const css = gradientCss(presetGradient(item.gradient), 90);
     return (
-      <div className="tpl-card swatch" title={item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`}>
+      <div className="tpl-card swatch" title={item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`} {...dragProps(item)}>
         <div className="swatch-fill" style={{ background: css }}>
           <button
             className="mini bg-btn"
@@ -77,7 +86,7 @@ function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
     );
   }
   return (
-    <div className={`tpl-card ${applied ? 'applied' : ''}`} title={applied ? `${item.name} — applied to the selected layer` : item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`}>
+    <div className={`tpl-card ${applied ? 'applied' : ''}`} title={applied ? `${item.name} — applied to the selected layer` : item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`} {...dragProps(item)}>
       <TemplateThumb item={item} />
       <span className="tpl-name">{item.name}</span>
       {applied && (
@@ -93,8 +102,10 @@ function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
 const matches = (item: LibraryItem, needle: string) => item.name.toLowerCase().includes(needle) || item.group.toLowerCase().includes(needle);
 
 export function LibraryPanel() {
-  const [cat, setCat] = useState<Tab>('textStyle');
-  const [q, setQ] = useState('');
+  const cat = useApp((s) => s.libTab) as Tab;
+  const q = useApp((s) => s.libQuery);
+  const setCat = (t: Tab) => appStore.set({ libTab: t });
+  const setQ = (v: string) => appStore.set({ libQuery: v });
   const needle = q.trim().toLowerCase();
   const favorites = useFavorites();
   const comp = useActiveComp();

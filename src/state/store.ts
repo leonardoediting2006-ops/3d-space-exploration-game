@@ -68,6 +68,8 @@ export interface AppState {
   pps: number;
   tlHeight: number;
   snap: boolean;
+  /** Play an animation once when it is applied from the Library or a picker. */
+  previewOnApply: boolean;
 
   playing: boolean;
   loopPlayback: boolean;
@@ -80,6 +82,9 @@ export interface AppState {
   safeMargins: boolean;
 
   rightTab: RightTab;
+  /** The Library's category and search text, kept while you switch to the Inspector and back. */
+  libTab: string;
+  libQuery: string;
   /** Inspector sections the user has collapsed (true = collapsed). */
   folded: Record<string, boolean>;
   /** Timeline shows the blend mode / matte / parent columns. */
@@ -88,6 +93,8 @@ export interface AppState {
   tlLeft: number;
   /** Project panel (compositions and footage) visible. */
   leftOpen: boolean;
+  /** Compositions whose "start something" card was dismissed. */
+  emptyDismissed: Record<string, boolean>;
   dialog: Dialog | null;
   toast: { id: number; text: string; action?: { label: string; run: () => void } } | null;
   assetVersion: number;
@@ -113,8 +120,10 @@ export const appStore = createStore<AppState>({
   expanded: {},
   showOnly: {},
   pps: 90,
-  tlHeight: 330,
+  // shorter windows get a shorter timeline so the viewer keeps a usable size
+  tlHeight: typeof window === 'undefined' ? 330 : Math.round(Math.min(330, Math.max(210, window.innerHeight * 0.34))),
   snap: true,
+  previewOnApply: true,
   playing: false,
   loopPlayback: true,
   zoom: 'fit',
@@ -124,10 +133,13 @@ export const appStore = createStore<AppState>({
   checkerboard: false,
   safeMargins: false,
   rightTab: 'inspector',
+  libTab: 'textStyle',
+  libQuery: '',
   folded: {},
   showColumns: false,
   tlLeft: 330,
   leftOpen: true,
+  emptyDismissed: {},
   dialog: null,
   toast: null,
   assetVersion: 0,

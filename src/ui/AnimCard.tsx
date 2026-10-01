@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { instanceAnimatorSetting, instanceEase, instanceSpan, instanceSpeed } from '../core/anims';
 import { ANIM_SLOTS, type AnimInstance, type AnimSlot, type Comp, type Layer } from '../core/types';
-import { alignAnim, removeAnim, setAnimEase, setAnimLength, setAnimSpeed, setAnimStart, setAnimStrength, setAnimTextSetting } from '../state/actions';
+import { alignAnim, previewRange, removeAnim, setAnimEase, setAnimLength, setAnimSpeed, setAnimStart, setAnimStrength, setAnimTextSetting } from '../state/actions';
 import { EaseButton } from './EaseEditor';
 import { NumberField, SliderField } from './fields';
 import { Icon } from './Icon';
@@ -78,6 +78,11 @@ function AnimCard({ layer, comp, inst }: { layer: Layer; comp: Pick<Comp, 'fps' 
           <Icon name="chevronRight" size={11} className="ac-chevron" />
           <span>{inst.name}</span>
         </button>
+        {span && (
+          <button className="icon-btn" title="Preview this animation" onClick={() => previewRange(span.start, span.end)} data-testid="anim-preview">
+            <Icon name="play" size={12} />
+          </button>
+        )}
         <button className="icon-btn" title="More" onClick={menu.toggle}>
           <Icon name="more" size={13} />
         </button>

@@ -13,7 +13,17 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-Open it and you land in a small demo composition. **Space** plays and **File → Export…** renders it to video. *Help → Keyboard Shortcuts* lists everything.
+Open it and you land in a small demo composition. **Space** plays and **Export** (top right) renders it to video. Press **Ctrl K** to search every command, effect, layer and template. *Help → Keyboard Shortcuts* (or **?**) lists everything.
+
+## A quick tour
+
+The interface is built around three ideas: *everything you select is editable in one place*, *everything the library gives you stays adjustable*, and *anything can be found by typing*.
+
+- **Inspector** (right panel). Select a layer and every property is there — transform, text or shape settings, applied animations, effects, letter animators, masks — as sliders, scrub fields and a colour picker. Bounded values are filled sliders (drag, click to type, arrow keys to nudge); changed values show a reset button; the diamond animates a property and ◂ ◆ ▸ step between its keyframes. Expand any animated property to get a **value graph** (drag keys in time and value) and a **keyframe list** with each key's time, value and easing curve, plus *Repeat* and *Wiggle*. With nothing selected it shows the composition (size presets, frame rate, duration, background).
+- **Animate** (in the Inspector). Everything applied from the library as an animation is remembered as a unit, grouped as **In / Out / Loop / Emphasis**. Each has **Start**, **Length**, **Strength** (how far it strays from the layer's resting values), **Easing** (any curve, edited with draggable handles or picked from 53 presets) and, for text, *Animate by* characters / words / lines and *Order*. Picking another In or Out animation replaces the old one; a text entrance, loop and exit can all coexist. The same blocks appear on the **timeline** as clips you can drag to move or resize to retime.
+- **Library** (right panel). 333 templates with live thumbnails (hover to play). Click to apply at the playhead, or **drag onto a layer** in the viewer or timeline — entrances land at the layer's start, exits end as it ends. Star favourites with the heart; a tick marks what's already on the selected layer.
+- **Ctrl K palette.** Commands, effects, layers and the whole library in one search box (“neon”, “align”, “blur”, “slide”…).
+- **Viewer.** Smart guides snap to the composition's edges and centre and to other layers (hold Alt to bypass); right-click for layer actions; an **Add** menu creates text, shapes, solids, images and compositions; align and distribute buttons work on one layer (to the canvas) or several (to each other); **Stagger** offsets entrances across selected layers.
 
 ## What it does
 
@@ -29,6 +39,11 @@ Open it and you land in a small demo composition. **Space** plays and **File →
 - **Wiggle** and **loop** (cycle / ping-pong) as built-in, deterministic property modifiers — no scripting involved.
 - **Text animators** — AE-style range selectors over characters, words or lines that move, scale, rotate, fade, space and tint individual letters (with a per-letter ease: back, elastic, bounce).
 - **Multi-stop gradients** (linear, radial, angular, reflected; repeat/mirror; animatable colours and phase) with a stop editor — fill any layer, text included.
+
+**Editing**
+- One **Inspector** for everything selected, with sliders, reset-to-default, per-keyframe time/value/easing, a value graph, loop and wiggle.
+- **Library animations are live objects**: retime, rescale, re-ease, replace or remove them at any time, from the Inspector or as clips on the timeline.
+- **Command palette** (Ctrl K), **drag-and-drop** from the library onto layers, **smart snapping guides**, align / distribute / stagger, a right-click menu, favourites, and a custom **colour picker** with the project's own colours.
 
 **Layers**
 - Solids, shape layers (rectangle, ellipse, polygon, star, **freeform bezier paths** with trim paths), text, images, nulls, adjustment layers, precomps.
@@ -65,6 +80,8 @@ The **Library** tab holds **333 ready-made templates**, each shown as a live thu
 
 Templates are plain data in `src/templates/`; a unit test applies every one, checks it survives a save/load round trip, and checks that re-applying never stacks duplicates, and a browser test renders every thumbnail at several times.
 
+Animations (motion, text animations and the animated looks) are tracked as **instances**: everything one creates — keyframes, effects, letter animators — is tagged with the instance, so Start, Length, Strength and Easing edit it as a whole, and removing it leaves nothing behind. *Strength* scales each animated value around the property's resting value (a slide travels half as far at 50%, a spin turns half as much); text range selectors are left alone because they are positions along the text, not amounts.
+
 ## Keyboard shortcuts (essentials)
 
 | Key | Action | Key | Action |
@@ -76,6 +93,8 @@ Templates are plain data in `src/templates/`; a unit test applies every one, che
 | `Ctrl+C/X/V` | Copy / cut / paste layers or keyframes | `Ctrl+D` | Duplicate |
 | `Ctrl+Shift+D` | Split layer at playhead | `Ctrl+Shift+C` | Pre-compose |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo | `Ctrl+S` / `Ctrl+O` / `Ctrl+M` | Save / open / export |
+| `Ctrl+K` | Command palette | `Ctrl+Shift+K` | Composition settings |
+| `?` | Keyboard shortcuts | `Alt` (while dragging) | Bypass snapping |
 
 ## Architecture
 
@@ -84,11 +103,13 @@ src/
   templates/ The library: easing, gradients, text styles/animations, motion, looks, scenes — plain data plus small authoring helpers.
   core/      Pure data & maths — no DOM. The document model (types.ts), keyframe interpolation incl. bezier
              easing, wiggle, loops and arc-length motion paths (interp.ts), bezier path geometry (path.ts),
-             effect definitions, factories, project (de)serialisation and validation.
+             effect definitions, factories, project (de)serialisation and validation. anims.ts edits applied
+             library animations as units (retime, strength, easing, remove); defaults.ts, color.ts.
   render/    Canvas 2D renderer: layer painters, effects, masks, mattes, motion blur, a canvas pool,
              hit-testing/geometry, and export (WebCodecs muxing, zip writer).
   state/     A small external store, an undo/redo history with gestures, and every user action.
-  ui/        React panels: viewer (gizmos, pen, motion paths), timeline, project, effects, dialogs, shortcuts.
+  ui/        React panels: viewer (gizmos, pen, snapping), timeline, Inspector (property rows, animation cards,
+             pickers, colour and easing editors), library, command palette, dialogs, shortcuts.
 e2e/         Browser end-to-end suites (Playwright + headless Chromium) that assert on rendered pixels.
 ```
 
@@ -124,7 +145,9 @@ Things a full compositing suite has that this does **not**:
 - No expression language — only the built-in wiggle and loop modifiers.
 - Text animators cover per-letter transforms, opacity, spacing and colour, but not per-letter blur, wiggle selectors or text on a path.
 - Shape layers hold one shape each: no shape groups, repeaters or merge/boolean paths. Gradients are applied with the Gradient Fill effect, so they colour the whole layer (fill and stroke together).
-- No graph editor with value/speed graphs (there is a per-segment bezier easing editor), no time remapping or stretch.
+- No full-size graph editor: each animated property has a value graph and per-segment bezier easing in the Inspector, but no speed graph, and no time remapping or stretch.
+- You cannot yet save your own animations or looks as library presets (every *application* of a library item is fully editable, but the catalogue itself is fixed).
+- The Inspector edits one layer at a time. Alignment, distribution, staggering and animations or effects added from the Inspector's pickers apply to every selected layer; individual property edits do not.
 - No motion tracking, stabilisation, roto brush, or colour management.
 - No plugin/effect SDK, and no import of other applications' project files.
 - Preview is software-composited Canvas 2D, not a GPU pipeline — very large compositions or heavy effect stacks will play below real time (use the preview resolution menu).

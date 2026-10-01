@@ -36,6 +36,7 @@ import {
   setMaskField,
   setParent,
   splitLayers,
+  staggerAnimations,
   trimLayer,
   updateLayerData,
   type AlignMode,
@@ -146,16 +147,31 @@ function LayerHeader({ layer, selectedCount }: { layer: Layer; selectedCount: nu
         <Icon name="more" />
       </button>
       {menu.anchor && <MenuPopover anchor={menu.anchor} onClose={menu.close} entries={entries} side="left" />}
-      {selectedCount > 1 && (
-        <div className="ins-multi">
-          {selectedCount} layers selected. Editing <b>{layer.name}</b>; align and distribute use them all.
-        </div>
-      )}
+      {selectedCount > 1 && <MultiBanner layer={layer} count={selectedCount} />}
       {layer.type === 'precomp' && layer.data.type === 'precomp' && (
         <button className="ins-open-comp" onClick={() => openComp((layer.data as Extract<LayerData, { type: 'precomp' }>).compId)}>
           Open composition <Icon name="arrowRight" size={12} />
         </button>
       )}
+    </div>
+  );
+}
+
+/** Shown when several layers are selected: what applies to all of them, and a stagger control. */
+function MultiBanner({ layer, count }: { layer: Layer; count: number }) {
+  const [step, setStep] = useState(0.1);
+  return (
+    <div className="ins-multi" data-testid="multi-banner">
+      <div>
+        {count} layers selected. Editing <b>{layer.name}</b>. Align, distribute and animations you add apply to all of them.
+      </div>
+      <div className="stagger-row">
+        <span>Stagger entrances</span>
+        <NumberField value={step} min={0} max={5} step={0.01} decimals={2} unit="s" onChange={setStep} title="Delay between one layer's entrance and the next" />
+        <button className="chip" onClick={() => staggerAnimations(appStore.get().selection, step)} data-testid="stagger">
+          Apply
+        </button>
+      </div>
     </div>
   );
 }

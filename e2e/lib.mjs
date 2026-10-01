@@ -24,9 +24,15 @@ export async function open({ downloads = false } = {}) {
   });
   page.on('pageerror', (e) => problems.push(`page error: ${e.message}`));
   await page.goto(`${BASE}/?debug`);
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    // the one-time tip would sit over the viewer in every run
+    localStorage.setItem('keyframe-studio:tip-dismissed', '1');
+  });
   await page.reload();
   await page.waitForSelector('[data-testid=comp-canvas]');
+  // applying a library animation would otherwise start a preview that moves the playhead under the test
+  await page.evaluate(() => window.__ks.appStore.set({ previewOnApply: false }));
   await page.waitForTimeout(400);
 
   const results = [];

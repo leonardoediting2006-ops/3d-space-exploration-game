@@ -469,4 +469,23 @@ describe('Inspector actions', () => {
     expect(layers()[0].anims).toHaveLength(0);
     expect(layers()[0].transform.position.keys).toHaveLength(0);
   });
+
+  it('staggers entrance animations across layers, and repeating it changes nothing', async () => {
+    const { applyLayerTemplate } = await import('./templateActions');
+    const { findLibraryItem } = await import('../templates');
+    const item = findLibraryItem('motion.fadeIn')!;
+    if (!('template' in item)) throw new Error('not a layer template');
+    const ids = [A.addSolid({ name: 'C' }), A.addSolid({ name: 'B' }), A.addSolid({ name: 'A' })];
+    A.selectLayers(ids);
+    applyLayerTemplate(item);
+    const starts = () => layers().map((l) => l.transform.opacity.keys[0].t);
+    expect(starts()).toEqual([0, 0, 0]);
+    expect(A.staggerAnimations(ids, 0.2)).toBe(2);
+    const first = starts();
+    expect(first[0]).toBeCloseTo(0, 5); // top layer keeps its timing
+    expect(first[1]).toBeCloseTo(0.2, 1);
+    expect(first[2]).toBeCloseTo(0.4, 1);
+    A.staggerAnimations(ids, 0.2);
+    expect(starts()).toEqual(first);
+  });
 });

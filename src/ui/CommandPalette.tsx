@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { closeDialog } from '../state/actions';
+import { toast } from '../state/store';
 import { Icon } from './Icon';
 import { buildCommands, rememberCommand, searchCommands, type Command } from './commands';
 
@@ -18,7 +19,8 @@ export function CommandPalette() {
   }, [index, results]);
 
   const run = (c: Command | undefined) => {
-    if (!c || c.disabled) return;
+    if (!c) return;
+    if (c.disabled) return toast(`“${c.title}” isn't available right now. It usually needs a selected layer or keyframes.`);
     rememberCommand(c.id);
     closeDialog();
     // let the palette unmount first so commands that open dialogs or take focus work as expected

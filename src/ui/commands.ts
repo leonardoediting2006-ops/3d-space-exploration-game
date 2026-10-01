@@ -31,6 +31,7 @@ import {
   smoothMotionPath,
   splitLayers,
   stackMove,
+  staggerAnimations,
   timeReverseKeys,
   updateComp,
   type AlignMode,
@@ -99,6 +100,8 @@ export function buildCommands(): Command[] {
   // arrange
   const aligns: [AlignMode, string][] = [['left', 'left'], ['centerH', 'horizontal center'], ['right', 'right'], ['top', 'top'], ['middle', 'vertical center'], ['bottom', 'bottom']];
   for (const [mode, label] of aligns) add('Arrange', `Align ${label}`, () => alignLayers(sel, mode), { disabled: !hasSel, keywords: 'center middle' });
+  add('Arrange', 'Stagger entrance animations (0.1 s)', () => void staggerAnimations(sel, 0.1), { disabled: sel.length < 2, keywords: 'offset delay cascade' });
+  add('Arrange', 'Stagger entrance animations (0.25 s)', () => void staggerAnimations(sel, 0.25), { disabled: sel.length < 2, keywords: 'offset delay cascade' });
   add('Arrange', 'Distribute horizontally', () => distributeLayers(sel, 'h'), { disabled: sel.length < 3, keywords: 'space evenly' });
   add('Arrange', 'Distribute vertically', () => distributeLayers(sel, 'v'), { disabled: sel.length < 3, keywords: 'space evenly' });
 
@@ -130,6 +133,7 @@ export function buildCommands(): Command[] {
   add('View', s.leftOpen ? 'Hide project panel' : 'Show project panel', () => appStore.set({ leftOpen: !s.leftOpen }), { keywords: 'footage compositions' });
   add('View', 'Show Inspector', () => appStore.set({ rightTab: 'inspector' }), { keywords: 'properties' });
   add('View', 'Show Library', () => appStore.set({ rightTab: 'library' }), { keywords: 'templates presets' });
+  add('View', s.previewOnApply ? 'Stop previewing animations when applied' : 'Preview animations when applied', () => appStore.set({ previewOnApply: !s.previewOnApply }));
   add('View', s.snap ? 'Turn snapping off' : 'Turn snapping on', () => appStore.set({ snap: !s.snap }));
   add('View', comp.motionBlur ? 'Turn motion blur off' : 'Turn motion blur on', () => updateComp(comp.id, { motionBlur: !comp.motionBlur }), { keywords: 'smooth shutter' });
 

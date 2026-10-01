@@ -92,12 +92,20 @@ export function goToKeyframe(dir: 1 | -1): void {
 let raf = 0;
 let playWall = 0;
 let playFrom = 0;
+/** A one-off preview: where to stop, and where the playhead goes back to afterwards. */
+let preview: { stopAt: number; returnTo: number } | null = null;
 
 function tick(wall: number): void {
   const s = S();
   const comp = activeComp(s);
   const end = comp.workEnd > comp.workStart ? comp.workEnd : comp.duration;
   let t = playFrom + (wall - playWall) / 1000;
+  if (preview && t >= preview.stopAt) {
+    const back = preview.returnTo;
+    pause();
+    setTime(back);
+    return;
+  }
   if (t >= end - 1e-6) {
     if (s.loopPlayback) {
       playWall = wall;
@@ -113,8 +121,28 @@ function tick(wall: number): void {
   raf = requestAnimationFrame(tick);
 }
 
+/**
+ * Play just the stretch around an animation once, then put the playhead back where it was, so
+ * applying something from the Library shows what it does without losing your place.
+ */
+export function previewRange(start: number, end: number): void {
+  if (S().playing) return;
+  const comp = activeComp();
+  const returnTo = now();
+  const from = Math.max(0, start - 0.25);
+  const stopAt = Math.min(comp.duration - 1 / comp.fps, end + 0.6);
+  if (stopAt <= from) return;
+  preview = { stopAt, returnTo };
+  setTime(from);
+  appStore.set({ playing: true });
+  playWall = performance.now();
+  playFrom = now();
+  raf = requestAnimationFrame(tick);
+}
+
 export function play(): void {
   if (S().playing) return;
+  preview = null;
   const comp = activeComp();
   const end = comp.workEnd > comp.workStart ? comp.workEnd : comp.duration;
   if (now() >= end - 1.5 / comp.fps || now() < comp.workStart) setTime(comp.workStart);
@@ -126,6 +154,7 @@ export function play(): void {
 
 export function pause(): void {
   cancelAnimationFrame(raf);
+  preview = null;
   if (S().playing) appStore.set({ playing: false });
 }
 
@@ -1414,4 +1443,37 @@ export function distributeLayers(ids: string[], axis: 'h' | 'v'): void {
       cursor += hi(b) - lo(b) + gap;
     }
   });
+}
+
+/**
+ * Stagger the entrance animations of several layers: the first (topmost) keeps its timing, and each
+ * layer below starts `step` seconds after the one before. Running it again gives the same result.
+ */
+export function staggerAnimations(ids: string[], step: number): number {
+  const compId = S().activeCompId;
+  let staggered = 0;
+  commit((p) => {
+    const comp = p.comps[compId];
+    const layers = comp.layers.filter((l) => ids.includes(l.id));
+    const startOf = (l: Layer): number | null => {
+      let min = Infinity;
+      for (const a of l.anims) {
+        if (a.slot !== 'in') continue;
+        const span = instanceSpan(l, a.id);
+        if (span) min = Math.min(min, span.start);
+      }
+      return Number.isFinite(min) ? min : null;
+    };
+    const withIn = layers.filter((l) => startOf(l) !== null);
+    if (withIn.length < 2) return;
+    const base = startOf(withIn[0])!;
+    withIn.forEach((l, i) => {
+      const delta = snapToFrame(base + i * step, comp.fps) - startOf(l)!;
+      if (Math.abs(delta) < 1e-9) return;
+      for (const a of l.anims) if (a.slot === 'in') shiftInstance(l, a.id, delta);
+      staggered++;
+    });
+  });
+  if (!staggered) toast('Select two or more layers that have an In animation to stagger them.');
+  return staggered;
 }

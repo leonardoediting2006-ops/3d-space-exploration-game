@@ -7,6 +7,7 @@ import { renderComp } from '../render/renderer';
 import {
   hitTestLayer,
   layerMap,
+  layerPolygon,
   localBounds,
   localMatrix,
   parentWorld,
@@ -16,6 +17,13 @@ import {
 import {
   addFootageLayer,
   addMask,
+  copySelection,
+  duplicateLayers,
+  pasteClipboard,
+  precompose,
+  resetTransform,
+  splitLayers,
+  stackMove,
   addPathShape,
   addShape,
   addText,
@@ -32,7 +40,11 @@ import {
   type PropUpdate,
 } from '../state/actions';
 import { activeComp, appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp } from '../state/store';
+import { dropLibraryItem, LIB_MIME } from '../state/templateActions';
+import { findLibraryItem } from '../templates';
+import { FirstRunTip } from './FirstRunTip';
 import { Icon } from './Icon';
+import { MenuPopover, type Anchor, type MenuEntry } from './Popover';
 import { editTarget, type PathTarget } from './pathEdit';
 import { ViewerBar } from './ViewerBar';
 
@@ -187,7 +199,7 @@ export const isPenActive = (): boolean => penActive;
 type Drag =
   | { kind: 'pan'; x: number; y: number; px: number; py: number }
   | { kind: 'zoom' }
-  | { kind: 'move'; start: Vec2; items: { id: string; pos: Vec2; inv: Mat | null }[]; moved: boolean; shiftLayer: string | null }
+  | { kind: 'move'; start: Vec2; items: { id: string; pos: Vec2; inv: Mat | null }[]; moved: boolean; shiftLayer: string | null; box0: Box | null; targets: SnapTargets }
   | { kind: 'scale'; id: string; handle: number; start: Vec2; anchor: Vec2; scale: Vec2; W: Mat }
   | { kind: 'rotate'; id: string; anchor: Vec2; rot: number; last: number; total: number }
   | { kind: 'create'; start: Vec2; cur: Vec2 }
@@ -196,6 +208,70 @@ type Drag =
   | { kind: 'mkey'; keyId: string; inv: Mat; grab: Vec2; v0: Vec2; pull: boolean }
   | { kind: 'mhandle'; keyId: string; which: 'in' | 'out'; inv: Mat; v0: Vec2; mirror: boolean }
   | { kind: 'vertex'; layerId: string; group: PropGroup; key: string; index: number; part: 'v' | 'in' | 'out'; v0: number[]; inv: Mat; grab: Vec2; smooth: boolean };
+
+/** An axis-aligned box in composition space. */
+interface Box {
+  l: number;
+  r: number;
+  t: number;
+  b: number;
+}
+
+/** Edges and centres a dragged layer can stick to. */
+interface SnapTargets {
+  x: number[];
+  y: number[];
+}
+
+/** The box around all the given layers as they currently appear. */
+function boxOf(project: Project, comp: Comp, ids: Set<string>, t: number): Box | null {
+  let box: Box | null = null;
+  for (const l of comp.layers) {
+    if (!ids.has(l.id)) continue;
+    const poly = layerPolygon(project, comp, l, t);
+    if (!poly?.length) continue;
+    for (const [x, y] of poly) {
+      box = box ? { l: Math.min(box.l, x), r: Math.max(box.r, x), t: Math.min(box.t, y), b: Math.max(box.b, y) } : { l: x, r: x, t: y, b: y };
+    }
+  }
+  return box;
+}
+
+/** The composition's edges and centre lines, plus the edges and centres of every other visible layer. */
+function snapTargetsFor(project: Project, comp: Comp, moving: Set<string>, t: number): SnapTargets {
+  const out: SnapTargets = { x: [0, comp.width / 2, comp.width], y: [0, comp.height / 2, comp.height] };
+  for (const l of comp.layers) {
+    if (moving.has(l.id) || !l.visible || t < l.inPoint || t >= l.outPoint || l.type === 'adjustment' || l.type === 'null') continue;
+    const b = boxOf(project, comp, new Set([l.id]), t);
+    if (!b) continue;
+    out.x.push(b.l, (b.l + b.r) / 2, b.r);
+    out.y.push(b.t, (b.t + b.b) / 2, b.b);
+  }
+  return out;
+}
+
+/** Nudge a drag so the moving box's edges or centre land on a target, if one is within `tol`. */
+function snapDrag(box: Box, dx: number, dy: number, targets: SnapTargets, tol: number): { dx: number; dy: number; gx: number | null; gy: number | null } {
+  const axis = (cands: number[], list: number[]): [number, number | null] => {
+    let best = tol;
+    let shift = 0;
+    let at: number | null = null;
+    for (const c of cands) {
+      for (const tgt of list) {
+        const d = tgt - c;
+        if (Math.abs(d) < best) {
+          best = Math.abs(d);
+          shift = d;
+          at = tgt;
+        }
+      }
+    }
+    return [shift, at];
+  };
+  const [sx, gx] = axis([box.l + dx, (box.l + box.r) / 2 + dx, box.r + dx], targets.x);
+  const [sy, gy] = axis([box.t + dy, (box.t + box.b) / 2 + dy, box.b + dy], targets.y);
+  return { dx: dx + sx, dy: dy + sy, gx, gy };
+}
 
 interface EditingText {
   layerId: string;
@@ -212,6 +288,7 @@ export function Viewer() {
   const quality = useApp((s) => s.quality);
   const checker = useApp((s) => s.checkerboard);
   const tool = useApp((s) => s.tool);
+  const emptyDismissed = useApp((s) => s.emptyDismissed);
   const assetVersion = useApp((s) => s.assetVersion);
 
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -292,6 +369,8 @@ export function Viewer() {
     }
   };
   const dragTick = useRef(0);
+  const guides = useRef<{ x: number | null; y: number | null }>({ x: null, y: null });
+  const dropTarget = useRef<string | null>(null);
 
   const schedule = () => {
     if (!rafRef.current) rafRef.current = requestAnimationFrame(draw);
@@ -316,6 +395,32 @@ export function Viewer() {
       g.lineTo(cw, ch / 2);
       g.stroke();
       g.setLineDash([]);
+    }
+    if (guides.current.x !== null || guides.current.y !== null) {
+      g.strokeStyle = '#ff5fa2';
+      g.lineWidth = 1;
+      g.beginPath();
+      if (guides.current.x !== null) {
+        g.moveTo(guides.current.x * zoom, 0);
+        g.lineTo(guides.current.x * zoom, ch);
+      }
+      if (guides.current.y !== null) {
+        g.moveTo(0, guides.current.y * zoom);
+        g.lineTo(cw, guides.current.y * zoom);
+      }
+      g.stroke();
+    }
+    const dropLayer = dropTarget.current ? c.layers.find((l) => l.id === dropTarget.current) : undefined;
+    const dgz = dropLayer ? computeGizmo(p, c, dropLayer, t, zoom) : null;
+    if (dgz) {
+      g.fillStyle = 'rgba(127,158,255,0.18)';
+      g.strokeStyle = '#7f9eff';
+      g.lineWidth = 2;
+      g.beginPath();
+      dgz.poly.forEach((pt, i) => (i === 0 ? g.moveTo(pt[0] * zoom, pt[1] * zoom) : g.lineTo(pt[0] * zoom, pt[1] * zoom)));
+      g.closePath();
+      g.fill();
+      g.stroke();
     }
     const layers = c.layers.filter((l) => sel.includes(l.id));
     for (const l of layers) {
@@ -763,7 +868,8 @@ export function Viewer() {
       }));
     el.setPointerCapture(e.pointerId);
     beginGesture();
-    drag.current = { kind: 'move', start: p, items, moved: false, shiftLayer: null };
+    const movingIds = new Set(items.map((i) => i.id));
+    drag.current = { kind: 'move', start: p, items, moved: false, shiftLayer: null, box0: boxOf(s.project, c, movingIds, t), targets: snapTargetsFor(s.project, c, movingIds, t) };
   };
 
   const onPointerMove = (e: RPointerEvent) => {
@@ -871,6 +977,15 @@ export function Viewer() {
         if (Math.abs(dx) > Math.abs(dy)) dy = 0;
         else dx = 0;
       }
+      guides.current = { x: null, y: null };
+      if (d.box0 && !e.altKey && appStore.get().snap) {
+        const sn = snapDrag(d.box0, dx, dy, d.targets, 7 / zoom);
+        dx = sn.dx;
+        dy = sn.dy;
+        guides.current = { x: sn.gx, y: sn.gy };
+      }
+      dragTick.current++;
+      schedule();
       const updates: PropUpdate[] = d.items.map((it) => {
         const v = it.inv ? applyVec(it.inv, [dx, dy]) : [dx, dy];
         return { layerId: it.id, group: 'transform', key: 'position', value: [it.pos[0] + v[0], it.pos[1] + v[1]] };
@@ -926,6 +1041,11 @@ export function Viewer() {
     const d = drag.current;
     drag.current = null;
     if (!d) return;
+    if (guides.current.x !== null || guides.current.y !== null) {
+      guides.current = { x: null, y: null };
+      dragTick.current++;
+      schedule();
+    }
     viewportRef.current?.releasePointerCapture?.(e.pointerId);
     if (d.kind === 'pen') {
       pen.current.dragging = false;
@@ -956,6 +1076,42 @@ export function Viewer() {
     if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor' || d.kind === 'vertex' || d.kind === 'mkey' || d.kind === 'mhandle') endGesture();
     force((n) => n + 1);
   };
+
+  const [ctxMenu, setCtxMenu] = useState<Anchor | null>(null);
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (editing || tool !== 'select') return;
+    const hit = pickLayer(toComp(e));
+    if (hit && !appStore.get().selection.includes(hit)) selectLayers([hit]);
+    if (!hit) selectLayers([]);
+    setCtxMenu({ left: e.clientX, top: e.clientY, right: e.clientX, bottom: e.clientY });
+  };
+  const ctxEntries = (): MenuEntry[] => {
+    const sel = appStore.get().selection;
+    if (!sel.length) {
+      return [
+        { label: 'Add text here', icon: <Icon name="text" />, run: () => addText('Your text', ctxPoint.current) },
+        { label: 'Add rectangle here', icon: <Icon name="shape" />, run: () => addShape('rect', [420, 300], ctxPoint.current) },
+        { label: 'Paste', hint: 'Ctrl+V', icon: <Icon name="copy" />, run: pasteClipboard, sep: true },
+        { label: 'Fit in window', icon: <Icon name="fit" />, run: () => appStore.set({ zoom: 'fit', panX: 0, panY: 0 }) },
+      ];
+    }
+    return [
+      { label: 'Animate…', hint: 'Inspector', icon: <Icon name="sparkle" />, run: () => appStore.set({ rightTab: 'library' }) },
+      { label: 'Duplicate', hint: 'Ctrl+D', icon: <Icon name="copy" />, run: () => duplicateLayers(sel), sep: true },
+      { label: 'Copy', hint: 'Ctrl+C', run: () => void copySelection() },
+      { label: 'Paste', hint: 'Ctrl+V', run: pasteClipboard },
+      { label: 'Split at playhead', hint: 'Ctrl+Shift+D', icon: <Icon name="layers" />, run: () => splitLayers(sel), sep: true },
+      { label: 'Pre-compose…', hint: 'Ctrl+Shift+C', icon: <Icon name="comp" />, run: () => precompose(sel) },
+      { label: 'Bring to front', hint: 'Ctrl+Shift+]', run: () => stackMove(sel, 'top'), sep: true },
+      { label: 'Bring forward', hint: 'Ctrl+]', run: () => stackMove(sel, 'up') },
+      { label: 'Send backward', hint: 'Ctrl+[', run: () => stackMove(sel, 'down') },
+      { label: 'Send to back', hint: 'Ctrl+Shift+[', run: () => stackMove(sel, 'bottom') },
+      { label: 'Reset transform', icon: <Icon name="reset" />, run: () => resetTransform(sel), sep: true },
+      { label: 'Delete', hint: 'Del', icon: <Icon name="trash" />, run: () => deleteLayers(sel), danger: true, sep: true },
+    ];
+  };
+  const ctxPoint = useRef<Vec2>([0, 0]);
 
   const onDoubleClick = (e: React.MouseEvent) => {
     if (tool === 'pen') {
@@ -1027,6 +1183,39 @@ export function Viewer() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(LIB_MIME)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          const hit = pickLayer(toComp(e));
+          if (hit !== dropTarget.current) {
+            dropTarget.current = hit;
+            dragTick.current++;
+            schedule();
+          }
+        }}
+        onDragLeave={() => {
+          if (dropTarget.current) {
+            dropTarget.current = null;
+            dragTick.current++;
+            schedule();
+          }
+        }}
+        onDrop={(e) => {
+          const id = e.dataTransfer.getData(LIB_MIME);
+          if (!id) return;
+          e.preventDefault();
+          const hit = pickLayer(toComp(e));
+          dropTarget.current = null;
+          dragTick.current++;
+          schedule();
+          const item = findLibraryItem(id);
+          if (item) dropLibraryItem(item, hit);
+        }}
+        onContextMenu={(e) => {
+          ctxPoint.current = toComp(e);
+          onContextMenu(e);
+        }}
         data-testid="viewport"
       >
         <div className={`stage ${checker ? 'checker' : ''}`} style={{ left: originX, top: originY, width: cw, height: ch }}>
@@ -1048,12 +1237,14 @@ export function Viewer() {
             onPointerDown={(e) => e.stopPropagation()}
           />
         )}
-        {comp.layers.length === 0 && !editing && <EmptyState />}
+        {comp.layers.length === 0 && !editing && tool === 'select' && !emptyDismissed[comp.id] && <EmptyState />}
+        {comp.layers.length > 0 && <FirstRunTip />}
         <div className="viewport-hud">
           {Math.round(zoom * 100)}% · {comp.width}×{comp.height}
         </div>
       </div>
       <ViewerBar fitZoom={fitZoom} />
+      {ctxMenu && <MenuPopover anchor={ctxMenu} onClose={() => setCtxMenu(null)} entries={ctxEntries()} width={230} />}
     </div>
   );
 }
@@ -1082,10 +1273,14 @@ const normalize = (v: Vec2): Vec2 => {
 function EmptyState() {
   const fileRef = useRef<HTMLInputElement>(null);
   const comp = activeComp();
+  const dismiss = () => appStore.set((s) => ({ emptyDismissed: { ...s.emptyDismissed, [comp.id]: true } }));
   const c: Vec2 = [comp.width / 2, comp.height / 2];
   return (
     <div className="viewer-empty" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} data-testid="viewer-empty">
       <div className="empty-card">
+        <button className="empty-close" title="Dismiss" onClick={dismiss}>
+          <Icon name="close" size={12} />
+        </button>
         <h2>Start something</h2>
         <p>Add a layer, then give it motion from the Library. Everything stays editable.</p>
         <div className="empty-actions">

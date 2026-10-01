@@ -54,6 +54,7 @@ export function MenuBar() {
   const checker = useApp((s) => s.checkerboard);
   const safe = useApp((s) => s.safeMargins);
   const leftOpen = useApp((s) => s.leftOpen);
+  const previewOnApply = useApp((s) => s.previewOnApply);
   const columns = useApp((s) => s.showColumns);
 
   useEffect(() => {
@@ -148,6 +149,7 @@ export function MenuBar() {
       { label: 'Transparency Grid', checked: checker, run: () => appStore.set({ checkerboard: !checker }) },
       { label: 'Safe Margins & Guides', checked: safe, run: () => appStore.set({ safeMargins: !safe }) },
       { sep: true },
+      { label: 'Preview Animations When Applied', checked: previewOnApply, run: () => appStore.set({ previewOnApply: !previewOnApply }) },
       { label: 'Project Panel', checked: leftOpen, run: () => appStore.set({ leftOpen: !leftOpen }) },
       { label: 'Timeline Columns (blend, matte, parent)', checked: columns, run: () => appStore.set({ showColumns: !columns }) },
       { sep: true },

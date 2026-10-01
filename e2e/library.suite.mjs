@@ -131,7 +131,8 @@ try {
   await page.click('.lib-cats >> text=Text Animations');
   await page.waitForTimeout(400);
   const card = page.locator('[data-testid="tpl-textanim.typewriter"] canvas');
-  await card.scrollIntoViewIfNeeded();
+  // centre it: the search / category header is sticky and would otherwise cover a card at the very top
+  await card.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   const frame = () => card.evaluate((c) => c.toDataURL());
   const still = await frame();
   await card.hover();

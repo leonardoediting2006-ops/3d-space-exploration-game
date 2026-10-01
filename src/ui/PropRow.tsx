@@ -8,10 +8,11 @@ import { NumberField, useTimeIf } from './fields';
 import { Icon } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
 import { PropEditor, ValueEditor } from './PropEditor';
+import { PropGraph } from './PropGraph';
 
 interface PropRowProps {
   layer: Layer;
-  comp: Pick<Comp, 'fps' | 'width' | 'height'>;
+  comp: Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
   group: PropGroup;
   propKey: string;
   prop: Prop;
@@ -111,10 +112,11 @@ export function PropRow({ layer, comp, group, propKey, prop, label, noKeys }: Pr
   );
 }
 
-function PropDetails({ layer, group, propKey, prop, comp }: { layer: Layer; group: PropGroup; propKey: string; prop: Prop; comp: Pick<Comp, 'fps'> }) {
+function PropDetails({ layer, group, propKey, prop, comp }: { layer: Layer; group: PropGroup; propKey: string; prop: Prop; comp: Pick<Comp, 'fps' | 'duration'> }) {
   const editable = prop.kind === 'number' || prop.kind === 'vec2' || prop.kind === 'color';
   return (
     <div className="pr-details">
+      {prop.keys.length > 1 && (prop.kind === 'number' || prop.kind === 'vec2') && <PropGraph prop={prop} duration={comp.duration} />}
       {prop.keys.map((k, i) => (
         <KeyRow key={k.id} k={k} prop={prop} last={i === prop.keys.length - 1} fps={comp.fps} editable={editable} />
       ))}

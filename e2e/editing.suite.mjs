@@ -99,7 +99,9 @@ check('text tool creates a text layer with typed text', st.layers.some((l) => l.
 await page.screenshot({ path: `${S}/12-tools.png` });
 
 // ---- 9. effects apply
-await page.click('[data-testid=fx-gaussianBlur] button');
+await page.click('[data-testid=tab-inspector]');
+await page.click('[data-testid=add-effect]');
+await page.click('[data-testid=fx-gaussianBlur]');
 const fxCount = await page.evaluate(() => { const s = window.__ks.appStore.get(); const c = s.project.comps[s.activeCompId]; return c.layers.find((l) => l.id === s.selection[0]).effects.length; });
 check('applying an effect adds it to the selected layer', fxCount === 1);
 await page.screenshot({ path: `${S}/13-fx.png` });

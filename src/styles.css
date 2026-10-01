@@ -506,6 +506,7 @@ kbd {
   overflow: auto;
   flex: 1;
   min-height: 0;
+  scroll-padding-top: 140px;
 }
 .project-panel .panel-body {
   padding: 6px;
@@ -635,6 +636,20 @@ kbd {
   font-size: 11px;
   line-height: 1.5;
   padding: 4px 4px 0;
+}
+.stagger-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text);
+}
+.stagger-row > span {
+  flex: 1;
+}
+.stagger-row .num {
+  flex: none;
+  width: 70px;
 }
 .ins-multi b {
   color: var(--text);
@@ -868,6 +883,38 @@ kbd {
   margin: 0 0 8px 18px;
   padding: 4px 0 4px 10px;
   border-left: 1px solid var(--line-2);
+}
+.prop-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 2px 0 8px;
+  background: var(--field);
+  border-radius: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.pg-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.pg-playhead {
+  stroke: var(--playhead);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+.pg-curve {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.pg-key {
+  fill: var(--field);
+  stroke-width: 2;
+  cursor: grab;
+}
+.pg-key:hover {
+  fill: var(--text);
 }
 .key-row {
   display: grid;
@@ -1759,6 +1806,7 @@ kbd {
   pointer-events: none;
 }
 .empty-card {
+  position: relative;
   pointer-events: auto;
   width: 340px;
   padding: 22px 22px 18px;
@@ -1777,6 +1825,17 @@ kbd {
   margin: 0 0 14px;
   color: var(--dim);
   line-height: 1.5;
+}
+.empty-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
 }
 .empty-actions {
   display: grid;
@@ -1925,12 +1984,12 @@ kbd {
   text-transform: uppercase;
   overflow: hidden;
 }
-.corner-name {
-  flex: 1;
-}
 .tl-corner span {
   flex: none;
   white-space: nowrap;
+}
+.tl-corner .corner-name {
+  flex: 1;
 }
 .tl-resize {
   position: absolute;
@@ -2051,6 +2110,10 @@ kbd {
 }
 .layer-left.drop {
   border-top-color: var(--accent);
+}
+.layer-left.lib-over {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .layer-left > * {
   flex: none;
@@ -2230,7 +2293,7 @@ kbd {
 }
 .prop-left .kfnav {
   display: inline-flex;
-  width: 52px;
+  width: 46px;
   flex: none;
   justify-content: flex-end;
 }
@@ -2267,7 +2330,7 @@ kbd {
   color: var(--text);
 }
 .prop-left .plabel {
-  width: 120px;
+  width: 96px;
   flex: none;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2913,6 +2976,13 @@ kbd {
   color: var(--key);
   background: rgba(10, 11, 14, 0.7);
 }
+.tpl-card.swatch .tpl-fav {
+  top: 6px;
+  left: 6px;
+  right: auto;
+  width: 18px;
+  height: 18px;
+}
 .tpl-badge {
   position: absolute;
   top: 8px;
@@ -2946,4 +3016,57 @@ kbd {
 }
 .tpl-card.swatch:hover .bg-btn {
   opacity: 1;
+}
+
+/* ---------------------------------------------------------------- first-run tip */
+.first-tip {
+  position: absolute;
+  left: 14px;
+  bottom: 30px;
+  width: 262px;
+  padding: 10px 34px 10px 14px;
+  font-size: 11.5px;
+  background: rgba(26, 28, 33, 0.94);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(8px);
+  line-height: 1.5;
+  animation: pop-in 0.2s var(--ease);
+}
+.first-tip p {
+  margin: 4px 0 0;
+  color: var(--dim);
+}
+.first-tip b {
+  color: var(--text);
+}
+.tip-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* ---------------------------------------------------------------- narrower windows */
+@media (max-width: 1440px) {
+  .comp-info {
+    display: none;
+  }
+  .palette-btn {
+    width: 150px;
+  }
+}
+@media (max-width: 1180px) {
+  .top {
+    grid-template-columns: 200px minmax(0, 1fr) 340px;
+  }
+  .palette-btn span,
+  .palette-btn kbd {
+    display: none;
+  }
+  .palette-btn {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
 }

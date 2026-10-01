@@ -54,6 +54,8 @@ import {
 import { appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp, useTime } from '../state/store';
 import { EaseEditor } from './EaseEditor';
 import { useTimeIf } from './fields';
+import { dropLibraryItem, LIB_MIME } from '../state/templateActions';
+import { findLibraryItem } from '../templates';
 import { Icon, LAYER_ICON } from './Icon';
 import { PropEditor } from './PropEditor';
 
@@ -640,6 +642,7 @@ interface LayerLeftProps {
 
 function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onSelect, onReorder }: LayerLeftProps) {
   const [renaming, setRenaming] = useState(false);
+  const [libOver, setLibOver] = useState(false);
   const color = LABEL_COLORS[layer.label % LABEL_COLORS.length];
   const toggleOpen = () => {
     if (appStore.get().showOnly[layer.id]) {
@@ -651,7 +654,27 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onS
   };
   const parents = comp.layers.filter((l) => l.id !== layer.id);
   return (
-    <div className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''} ${layer.visible ? '' : 'is-hidden'}`} data-layer-index={index} onPointerDown={onSelect} data-testid={`layer-row-${index}`}>
+    <div
+      className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''} ${layer.visible ? '' : 'is-hidden'} ${libOver ? 'lib-over' : ''}`}
+      data-layer-index={index}
+      onPointerDown={onSelect}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(LIB_MIME)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setLibOver(true);
+      }}
+      onDragLeave={() => setLibOver(false)}
+      onDrop={(e) => {
+        const id = e.dataTransfer.getData(LIB_MIME);
+        setLibOver(false);
+        if (!id) return;
+        e.preventDefault();
+        const item = findLibraryItem(id);
+        if (item) dropLibraryItem(item, layer.id);
+      }}
+      data-testid={`layer-row-${index}`}
+    >
       <button className={`twirl ${open ? 'open' : ''}`} onClick={toggleOpen} title="Show properties (P S R T A U)" data-testid={`twirl-${index}`}>
         <Icon name="chevronRight" size={12} />
       </button>
