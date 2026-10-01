@@ -44,8 +44,10 @@ async function boot() {
       <App />
     </StrictMode>,
   );
-  // handy for debugging and automated tests
-  (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions };
+  // Debug hook for the end-to-end tests: always on in dev, opt-in in builds with ?debug
+  if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
+    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions };
+  }
 }
 
 void boot();

@@ -308,3 +308,20 @@ describe('compositions', () => {
     expect(appStore.get().project.compOrder).toHaveLength(1);
   });
 });
+
+describe('easing a Hold keyframe', () => {
+  it('Easy Ease converts the leaving segment but leaves an arriving Hold alone', () => {
+    const id = A.addSolid({ name: 'A' });
+    const l = layers()[0];
+    setKeyAt(l.transform.rotation, 0, 0, 1e-3, 'hold');
+    setKeyAt(l.transform.rotation, 1, 50, 1e-3, 'hold');
+    setKeyAt(l.transform.rotation, 2, 100, 1e-3);
+    appStore.set({ project: structuredClone(appStore.get().project) });
+    const keys = layers()[0].transform.rotation.keys;
+    A.applyKeyEase([keys[1].id], 'both');
+    const k = layers()[0].transform.rotation.keys;
+    expect(k[0].ease).toBe('hold'); // arriving segment is still a step
+    expect(Array.isArray(k[1].ease)).toBe(true); // the keyframe itself is now eased
+    void id;
+  });
+});

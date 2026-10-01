@@ -971,7 +971,8 @@ export function applyKeyEase(ids: string[], mode: EaseMode): void {
             if (leaving) k.ease = 'hold';
           } else {
             if (leaving && (mode === 'both' || mode === 'out')) {
-              const b = asBezier(k.ease);
+              // easing a Hold keyframe turns it into an eased one, as in AE
+              const b = k.ease === 'hold' ? ([1 / 3, 1 / 3, 2 / 3, 2 / 3] as Bez) : asBezier(k.ease);
               if (b) {
                 b[0] = 0.33;
                 b[1] = 0;
