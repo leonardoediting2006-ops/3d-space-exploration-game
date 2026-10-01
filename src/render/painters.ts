@@ -1,5 +1,6 @@
 import { cssColor, evalColor, evalNum, evalProp, evalVec } from '../core/interp';
 import { pathLength, pathToPath2D, pointCount } from '../core/path';
+import { computeCharStyles, evalAnimator, mixColor } from '../core/textAnim';
 import { TAU } from '../core/math';
 import type { Layer, Project } from '../core/types';
 import { getAssetImage } from './assets';
@@ -124,9 +125,62 @@ function paintShape(ctx: CanvasRenderingContext2D, layer: Layer, t: number): voi
   }
 }
 
+/** Text with animators: laid out character by character so each can be moved, scaled, faded and tinted. */
+function paintTextAnimated(ctx: CanvasRenderingContext2D, layer: Layer, t: number): void {
+  const d = layer.data;
+  if (d.type !== 'text') return;
+  const size = Math.max(1, evalNum(layer.content.fontSize, t));
+  ctx.font = textFont(layer, t);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.lineJoin = 'round';
+  if ('letterSpacing' in ctx) (ctx as unknown as { letterSpacing: string }).letterSpacing = '0px';
+  const baseTracking = evalNum(layer.content.tracking, t);
+  const fill = evalColor(layer.content.fillColor, t);
+  const stroke = evalColor(layer.content.strokeColor, t);
+  const sw = evalNum(layer.content.strokeWidth, t);
+  const styles = computeCharStyles(d.text, layer.animators.map((a) => evalAnimator(a, t)));
+  const lh = size * 1.2;
+  let ci = 0;
+  d.text.split('\n').forEach((line, li) => {
+    const xs: number[] = [];
+    const ws: number[] = [];
+    let x = 0;
+    for (let k = 0; k < line.length; k++) {
+      const w = ctx.measureText(line.slice(0, k + 1)).width - ctx.measureText(line.slice(0, k)).width;
+      xs.push(x);
+      ws.push(w);
+      x += w + baseTracking + styles[ci + k].tracking;
+    }
+    const startX = d.align === 'left' ? 0 : d.align === 'center' ? -x / 2 : -x;
+    const baseline = li * lh;
+    const pivotY = baseline - size * 0.32;
+    for (let k = 0; k < line.length; k++) {
+      const st = styles[ci + k];
+      const ch = line[k];
+      if (/\s/.test(ch) || st.alpha <= 0.001) continue;
+      ctx.save();
+      ctx.translate(startX + xs[k] + ws[k] / 2 + st.dx, pivotY + st.dy);
+      if (st.rot) ctx.rotate((st.rot * Math.PI) / 180);
+      ctx.scale(st.sx, st.sy);
+      ctx.globalAlpha *= Math.min(1, st.alpha);
+      if (d.stroke && sw > 0) {
+        ctx.lineWidth = sw;
+        ctx.strokeStyle = cssColor(stroke);
+        ctx.strokeText(ch, -ws[k] / 2, baseline - pivotY);
+      }
+      ctx.fillStyle = cssColor(mixColor(fill, st.mix));
+      ctx.fillText(ch, -ws[k] / 2, baseline - pivotY);
+      ctx.restore();
+    }
+    ci += line.length + 1;
+  });
+}
+
 function paintText(ctx: CanvasRenderingContext2D, layer: Layer, t: number): void {
   const d = layer.data;
   if (d.type !== 'text') return;
+  if (layer.animators.length) return paintTextAnimated(ctx, layer, t);
   const size = Math.max(1, evalNum(layer.content.fontSize, t));
   ctx.font = textFont(layer, t);
   ctx.textAlign = d.align;

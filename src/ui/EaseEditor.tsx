@@ -1,8 +1,10 @@
 import { useRef } from 'react';
-import { EASE_IN, EASE_OUT, EASY_EASE, type Bezier } from '../core/interp';
+import { easeProgress, type Bezier } from '../core/interp';
 import { findKey } from '../core/props';
-import { applyKeyEase, setKeyBezier } from '../state/actions';
+import { EASING_PRESETS } from '../templates/easing';
+import { applyKeyEase, setKeyBezier, setKeysEase } from '../state/actions';
 import { beginGesture, endGesture, useActiveComp } from '../state/store';
+import { EaseThumb } from './EaseThumb';
 
 const SIZE = 200;
 const PAD = 14;
@@ -26,6 +28,16 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
   const left = Math.max(8, Math.min(x, window.innerWidth - SIZE - 40));
   const top = Math.max(8, Math.min(y, window.innerHeight - SIZE - 150));
 
+  const gallery = (
+    <div className="ee-gallery" data-testid="ease-gallery">
+      {EASING_PRESETS.map((p) => (
+        <button key={p.id} className="ee-item" title={p.name} onClick={() => setKeysEase([keyId], p.ease)} data-testid={`ease-${p.id}`}>
+          <EaseThumb ease={p.ease} size={38} active={JSON.stringify(p.ease) === JSON.stringify(key.ease)} />
+        </button>
+      ))}
+    </div>
+  );
+
   if (!next || key.ease === 'hold') {
     return (
       <div className="ease-editor" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
@@ -33,10 +45,33 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
           <b>Easing</b>
           <button className="mini" onClick={onClose}>✕</button>
         </header>
-        <p className="note">{!next ? 'The last keyframe has no outgoing segment to ease.' : 'This keyframe holds its value. Choose Linear to ease it.'}</p>
-        {next && (
-          <button onClick={() => applyKeyEase([keyId], 'linear')}>Make Linear</button>
-        )}
+        <p className="note">{!next ? 'The last keyframe has no outgoing segment to ease.' : 'This keyframe holds its value. Pick a curve to ease it.'}</p>
+        {next && gallery}
+      </div>
+    );
+  }
+
+  if (typeof key.ease === 'string' && key.ease !== 'linear') {
+    // a named procedural curve: show it, but it has no bezier handles to drag
+    const n = 48;
+    let d = '';
+    for (let i = 0; i <= n; i++) {
+      const [px, py] = toPx(i / n, easeProgress(key.ease, i / n));
+      d += `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)} `;
+    }
+    return (
+      <div className="ease-editor" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()} data-testid="ease-editor">
+        <header>
+          <b>Easing · {prop.label}</b>
+          <button className="mini" onClick={onClose}>✕</button>
+        </header>
+        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+          <rect x={PAD} y={toPx(0, 1)[1]} width={SIZE - 2 * PAD} height={toPx(0, 0)[1] - toPx(0, 1)[1]} className="ee-box" />
+          <path d={d} className="ee-curve" />
+        </svg>
+        <div className="ee-values">{key.ease} (procedural curve)</div>
+        <button className="mini" onClick={() => applyKeyEase([keyId], 'both')}>Convert to editable bezier</button>
+        {gallery}
       </div>
     );
   }
@@ -59,7 +94,7 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
       const ny = Math.min(Y_MAX, Math.max(Y_MIN, Y_MAX - ((py - PAD) / (SIZE - 2 * PAD)) * (Y_MAX - Y_MIN)));
       const cur = findKey(comp.layers, keyId);
       const e0 = cur ? cur.prop.keys[cur.index].ease : 'linear';
-      const base: Bezier = e0 === 'linear' || e0 === 'hold' ? [1 / 3, 1 / 3, 2 / 3, 2 / 3] : [e0[0], e0[1], e0[2], e0[3]];
+      const base: Bezier = Array.isArray(e0) ? [e0[0], e0[1], e0[2], e0[3]] : [1 / 3, 1 / 3, 2 / 3, 2 / 3];
       if (which === 0) {
         base[0] = nx;
         base[1] = ny;
@@ -78,12 +113,6 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
     window.addEventListener('pointerup', up);
   };
 
-  const preset = (name: string, v: Bezier | 'linear') => (
-    <button key={name} className="mini" onClick={() => (v === 'linear' ? applyKeyEase([keyId], 'linear') : setKeyBezier(keyId, v))}>
-      {name}
-    </button>
-  );
-
   return (
     <div className="ease-editor" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()} data-testid="ease-editor">
       <header>
@@ -99,13 +128,7 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
         <circle cx={h2x} cy={h2y} r={6} className="ee-handle" onPointerDown={drag(1)} data-testid="ease-handle-2" />
       </svg>
       <div className="ee-values">{b.map((v) => v.toFixed(2)).join(', ')}</div>
-      <div className="ee-presets">
-        {preset('Linear', 'linear')}
-        {preset('Easy Ease', EASY_EASE)}
-        {preset('Ease In', EASE_IN)}
-        {preset('Ease Out', EASE_OUT)}
-        {preset('Overshoot', [0.34, 1.56, 0.64, 1])}
-      </div>
+      {gallery}
       <div className="ee-hint">Time → right, value ↑. Drag the handles; pull above/below the box to overshoot.</div>
     </div>
   );

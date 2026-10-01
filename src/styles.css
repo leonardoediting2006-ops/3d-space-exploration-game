@@ -1331,3 +1331,101 @@ kbd {
   margin: 0 0 8px;
   font-size: 18px;
 }
+
+.ee-gallery {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+  margin-top: 8px;
+  max-height: 150px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.ee-item {
+  padding: 0;
+  background: #15161a;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  line-height: 0;
+}
+.ee-item:hover {
+  border-color: var(--accent);
+  background: #1c1d22;
+}
+.ease-thumb {
+  display: block;
+  margin: 0 auto;
+}
+.et-axis {
+  stroke: #343540;
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.et-curve {
+  fill: none;
+  stroke: #9ab;
+  stroke-width: 1.6;
+}
+.ease-thumb.active .et-curve,
+.ee-item:hover .et-curve {
+  stroke: var(--accent);
+}
+
+/* ---------------------------------------------------------------- gradients */
+.grad-bar {
+  width: 120px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid #55565f;
+  border-radius: 3px;
+}
+.grad-pop {
+  position: fixed;
+  z-index: 150;
+  width: 292px;
+  padding: 8px 12px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+.grad-pop header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.gp-bar {
+  width: 260px;
+  height: 28px;
+  border: 1px solid #55565f;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+.gp-handles {
+  position: relative;
+  height: 20px;
+}
+.gp-handle {
+  position: absolute;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border: 2px solid #fff;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #000;
+  cursor: ew-resize;
+}
+.gp-handle.sel {
+  border-color: var(--key);
+}
+.gp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.gp-label {
+  color: var(--dim);
+}

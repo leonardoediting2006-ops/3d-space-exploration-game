@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { EFFECTS, getEffectDef } from '../core/effectDefs';
 import { PRESETS } from '../core/props';
+import type { AnimatorKind } from '../core/factory';
 import type { Layer, Prop, PropGroup } from '../core/types';
 import {
   addEffect,
+  addTextAnimator,
   applyPreset,
   moveEffect,
   openComp,
@@ -13,7 +15,8 @@ import {
   updateLayerData,
 } from '../state/actions';
 import { appStore, toast, useActiveComp, useApp, type RightTab } from '../state/store';
-import { PropEditor, NumberField } from './fields';
+import { NumberField } from './fields';
+import { PropEditor } from './PropEditor';
 
 export function RightPanel() {
   const tab = useApp((s) => s.rightTab);
@@ -182,6 +185,31 @@ function LayerTab() {
             <label>Stroke</label>
             <label className="chk"><input type="checkbox" checked={d.stroke} onChange={(e) => updateLayerData(layer.id, { stroke: e.target.checked })} /> Enable</label>
           </div>
+        </section>
+      )}
+      {d.type === 'text' && (
+        <section>
+          <header><b>Text Animators</b></header>
+          <div className="row">
+            <label>Add</label>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) addTextAnimator(layer.id, e.target.value as AnimatorKind);
+              }}
+              data-testid="add-animator"
+            >
+              <option value="">Animator…</option>
+              <option value="blank">Blank</option>
+              <option value="opacity">Opacity</option>
+              <option value="position">Position</option>
+              <option value="scale">Scale</option>
+              <option value="rotation">Rotation</option>
+              <option value="tracking">Tracking</option>
+              <option value="color">Fill Color</option>
+            </select>
+          </div>
+          <div className="hint">{layer.animators.length ? `${layer.animators.length} animator${layer.animators.length === 1 ? '' : 's'} — edit them in the timeline (U shows animated properties).` : 'Animators move, fade, scale and tint individual characters, words or lines.'}</div>
         </section>
       )}
       {d.type === 'shape' && (

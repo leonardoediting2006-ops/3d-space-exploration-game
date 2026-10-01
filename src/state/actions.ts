@@ -2,6 +2,7 @@ import { createEffect } from '../core/effectDefs';
 import {
   createAdjustment,
   createComp,
+  createAnimator,
   createMask,
   createPathShape,
   starterMaskPath,
@@ -15,7 +16,8 @@ import {
   nextCount,
 } from '../core/factory';
 import { uid } from '../core/ids';
-import { baseValue, evalProp, setAnimated, setKeyAt, sortKeys } from '../core/interp';
+import type { AnimatorKind } from '../core/factory';
+import { baseValue, evalProp, NAMED_EASE_REVERSE, setAnimated, setKeyAt, sortKeys } from '../core/interp';
 import { clamp } from '../core/math';
 import { insertVertex, removeVertex } from '../core/path';
 import { cloneLayer, findKey, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
@@ -946,7 +948,8 @@ export function sequenceLayers(ids: string[]): void {
 export type EaseMode = 'both' | 'in' | 'out' | 'linear' | 'hold';
 
 type Bez = [number, number, number, number];
-const asBezier = (e: Ease): Bez | null => (e === 'hold' ? null : e === 'linear' ? [1 / 3, 1 / 3, 2 / 3, 2 / 3] : [e[0], e[1], e[2], e[3]]);
+/** A bezier to edit: real curves are copied; linear and named curves start from a straight line; hold has none. */
+const asBezier = (e: Ease): Bez | null => (e === 'hold' ? null : Array.isArray(e) ? [e[0], e[1], e[2], e[3]] : [1 / 3, 1 / 3, 2 / 3, 2 / 3]);
 
 /**
  * AE-style keyframe assistant. A keyframe's "out" influence lives on the segment leaving it and its
@@ -1024,6 +1027,7 @@ export function timeReverseKeys(ids: string[]): void {
           const seg = snapshot[m - 2 - j]?.ease;
           if (seg === undefined) k.ease = 'linear';
           else if (seg === 'hold' || seg === 'linear') k.ease = seg;
+          else if (typeof seg === 'string') k.ease = NAMED_EASE_REVERSE[seg];
           else k.ease = [1 - seg[2], 1 - seg[3], 1 - seg[0], 1 - seg[1]];
         });
         sortKeys(prop);
@@ -1168,5 +1172,58 @@ export function setKeyframeSpatial(keyId: string, patch: { v?: Vec2; sIn?: Vec2 
       if (patch.sOut) k.sOut = [...patch.sOut];
       else delete k.sOut;
     }
+  });
+}
+
+/** Apply an easing curve to the selected keyframes, or — with none selected — to every keyframe on the selected layers. */
+export function applyEasePreset(ease: Ease): number {
+  const s = S();
+  const comp = activeComp(s);
+  let count = 0;
+  const ids = new Set(s.selKeys);
+  const targetLayers = new Set(s.selection);
+  if (!ids.size && !targetLayers.size) {
+    toast('Select keyframes (or a layer) first, then pick an easing curve.');
+    return 0;
+  }
+  commit((p) => {
+    for (const l of p.comps[comp.id].layers) {
+      if (!ids.size && !targetLayers.has(l.id)) continue;
+      for (const prop of layerProps(l)) {
+        prop.keys.forEach((k, i) => {
+          if (i === prop.keys.length - 1) return; // the last keyframe has no segment leaving it
+          if (ids.size ? ids.has(k.id) : true) {
+            k.ease = typeof ease === 'object' ? [...ease] : ease;
+            count++;
+          }
+        });
+      }
+    }
+  });
+  toast(count ? `Applied to ${count} keyframe${count === 1 ? '' : 's'}` : 'Nothing to ease — keyframes need a following keyframe.');
+  return count;
+}
+
+/* ------------------------------------------------------------------ text animators */
+
+export function addTextAnimator(layerId: string, kind: AnimatorKind = 'blank'): string {
+  const compId = S().activeCompId;
+  let id = '';
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    if (!l || l.data.type !== 'text') return;
+    const a = createAnimator(`Animator ${l.animators.length + 1}`, kind);
+    id = a.id;
+    l.animators.push(a);
+  });
+  if (!id) toast('Text animators work on text layers.');
+  return id;
+}
+
+export function removeTextAnimator(layerId: string, animatorId: string): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    if (l) l.animators = l.animators.filter((a) => a.id !== animatorId);
   });
 }

@@ -1,5 +1,6 @@
-import { cssColor, evalColor, evalNum, evalVec } from '../core/interp';
+import { cssColor, evalColor, evalNum, evalProp, evalVec } from '../core/interp';
 import { clamp, degToRad } from '../core/math';
+import { rgbCss, sampleGradient, wrapT, type GradientMode } from '../core/gradient';
 import type { Effect } from '../core/types';
 import type { Rect } from './geometry';
 import { acquire, FILTER_SUPPORTED, release } from './pool';
@@ -358,6 +359,44 @@ function fractalNoise(src: Canvas, r: Rect, o: { contrast: number; brightness: n
   return src;
 }
 
+
+function gradientFill(
+  src: Canvas,
+  r: Rect,
+  o: { gradient: number[]; type: number; angle: number; scale: number; center: [number, number]; offset: number; repeats: number; mode: GradientMode; amount: number },
+  outScale: number,
+): Canvas {
+  const ctx = src.getContext('2d')!;
+  const cx = r.x + r.w / 2 + o.center[0] * outScale;
+  const cy = r.y + r.h / 2 + o.center[1] * outScale;
+  const a = degToRad(o.angle);
+  const dx = Math.cos(a);
+  const dy = Math.sin(a);
+  const k = Math.max(0.01, o.scale / 100);
+  let g: CanvasGradient;
+  if (o.type === 1) {
+    g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, (Math.hypot(r.w, r.h) / 2) * k));
+  } else if (o.type === 2) {
+    g = ctx.createConicGradient(a, cx, cy);
+  } else {
+    const half = ((Math.abs(r.w * dx) + Math.abs(r.h * dy)) * k) / 2;
+    g = ctx.createLinearGradient(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half);
+  }
+  const N = 64;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const base = o.type === 3 ? Math.abs(2 * u - 1) : u;
+    g.addColorStop(u, rgbCss(sampleGradient(o.gradient, wrapT(base * o.repeats + o.offset / 100, o.mode))));
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.globalAlpha = clamp(o.amount / 100, 0, 1);
+  ctx.fillStyle = g;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+  return src;
+}
+
 function applyOne(src: Canvas, fx: Effect, ctx: FxContext): Canvas {
   const t = ctx.time;
   const r = ctx.rect;
@@ -465,6 +504,23 @@ function applyOne(src: Canvas, fx: Effect, ctx: FxContext): Canvas {
       });
       return src;
     }
+    case 'gradientFill':
+      return gradientFill(
+        src,
+        r,
+        {
+          gradient: evalProp(p.gradient, t) as number[],
+          type: Math.round(n('type')),
+          angle: n('angle'),
+          scale: n('scale'),
+          center: evalVec(p.center, t),
+          offset: n('offset'),
+          repeats: n('repeats'),
+          mode: (['clamp', 'repeat', 'mirror'] as const)[Math.round(n('mode'))] ?? 'clamp',
+          amount: n('amount'),
+        },
+        ctx.scale,
+      );
     case 'linearWipe':
       return linearWipe(src, n('completion'), n('angle'), n('feather') * ctx.scale, r);
     case 'radialWipe': {

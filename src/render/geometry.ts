@@ -148,7 +148,14 @@ export function contentPad(layer: Layer, t: number): number {
   if (d.type === 'shape' && d.stroke) return evalNum(layer.content.strokeWidth, t) * 2.5;
   if (d.type === 'text') {
     const size = evalNum(layer.content.fontSize, t);
-    return size * 0.15 + (d.stroke ? evalNum(layer.content.strokeWidth, t) : 0);
+    let pad = size * 0.15 + (d.stroke ? evalNum(layer.content.strokeWidth, t) : 0);
+    // animators can fling characters well outside the text's own box
+    for (const a of layer.animators) {
+      const [px, py] = evalVec(a.props.position, t);
+      const [sx, sy] = evalVec(a.props.scale, t);
+      pad += Math.hypot(px, py) + size * Math.max(0, Math.max(sx, sy) / 100 - 1) + size * 0.7 + Math.abs(evalNum(a.props.tracking, t)) * 4;
+    }
+    return pad;
   }
   return 0;
 }

@@ -1,4 +1,5 @@
 import { uid } from './ids';
+import { makeGradient } from './gradient';
 import type { Comp, Effect, Prop, PropKind, PropValue } from './types';
 
 export interface ParamDef {
@@ -126,6 +127,22 @@ export const EFFECTS: EffectDef[] = [
       { key: 'endColor', label: 'End Color', kind: 'color', value: [255, 255, 255] },
       { key: 'shape', label: 'Ramp Shape', kind: 'number', value: 0, options: ['Linear Ramp', 'Radial Ramp'] },
       { key: 'blend', label: 'Blend With Original', kind: 'number', value: 0, unit: '%', min: 0, max: 100, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'gradientFill',
+    name: 'Gradient Fill',
+    category: 'Generate',
+    params: [
+      { key: 'gradient', label: 'Gradient', kind: 'gradient', value: makeGradient(['#ff512f', '#f09819', '#dd2476']) },
+      { key: 'type', label: 'Type', kind: 'number', value: 0, options: ['Linear', 'Radial', 'Angular', 'Reflected'] },
+      { key: 'angle', label: 'Angle', kind: 'number', value: 90, unit: '°', step: 1, decimals: 0 },
+      { key: 'scale', label: 'Scale', kind: 'number', value: 100, unit: '%', min: 1, max: 1000, step: 1, decimals: 0 },
+      { key: 'center', label: 'Center Offset', kind: 'vec2', value: () => [0, 0], unit: 'px', step: 1, decimals: 0 },
+      { key: 'offset', label: 'Phase', kind: 'number', value: 0, unit: '%', step: 0.5, decimals: 1 },
+      { key: 'repeats', label: 'Repeats', kind: 'number', value: 1, min: 1, max: 32, step: 0.1, decimals: 1 },
+      { key: 'mode', label: 'Outside Range', kind: 'number', value: 0, options: ['Clamp', 'Repeat', 'Mirror'] },
+      { key: 'amount', label: 'Amount', kind: 'number', value: 100, unit: '%', min: 0, max: 100, step: 1, decimals: 0 },
     ],
   },
   {

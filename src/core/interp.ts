@@ -1,5 +1,5 @@
 import { uid } from './ids';
-import type { Ease, Keyframe, Prop, PropValue } from './types';
+import type { Ease, Keyframe, NamedEase, Prop, PropValue } from './types';
 
 export type Bezier = [number, number, number, number];
 export const EASY_EASE: Bezier = [0.33, 0, 0.67, 1];
@@ -35,9 +35,50 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number, x: n
   return by(t);
 }
 
+const bounceOut = (p: number): number => {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (p < 1 / d1) return n1 * p * p;
+  if (p < 2 / d1) return n1 * (p -= 1.5 / d1) * p + 0.75;
+  if (p < 2.5 / d1) return n1 * (p -= 2.25 / d1) * p + 0.9375;
+  return n1 * (p -= 2.625 / d1) * p + 0.984375;
+};
+const elasticOut = (p: number): number => (p <= 0 ? 0 : p >= 1 ? 1 : 2 ** (-10 * p) * Math.sin(((p * 10 - 0.75) * (2 * Math.PI)) / 3) + 1);
+const inOut = (out: (p: number) => number) => (p: number) => (p < 0.5 ? (1 - out(1 - 2 * p)) / 2 : (1 + out(2 * p - 1)) / 2);
+const steps = (n: number) => (p: number) => Math.min(1, Math.floor(Math.max(0, p) * n) / (n - 1));
+
+/** Named curves as functions of normalised time. Each maps 0→0 and 1→1 (overshoot allowed in between). */
+export const NAMED_EASE_FNS: Record<NamedEase, (p: number) => number> = {
+  bounceOut,
+  bounceIn: (p) => 1 - bounceOut(1 - p),
+  bounceInOut: inOut(bounceOut),
+  elasticOut,
+  elasticIn: (p) => 1 - elasticOut(1 - p),
+  elasticInOut: inOut(elasticOut),
+  springOut: (p) => (p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-6 * p) * Math.cos(11 * p)),
+  steps4: steps(4),
+  steps8: steps(8),
+  steps16: steps(16),
+};
+
+/** The reverse of a named curve when keyframes are time-reversed. */
+export const NAMED_EASE_REVERSE: Record<NamedEase, NamedEase> = {
+  bounceOut: 'bounceIn',
+  bounceIn: 'bounceOut',
+  bounceInOut: 'bounceInOut',
+  elasticOut: 'elasticIn',
+  elasticIn: 'elasticOut',
+  elasticInOut: 'elasticInOut',
+  springOut: 'elasticIn',
+  steps4: 'steps4',
+  steps8: 'steps8',
+  steps16: 'steps16',
+};
+
 export function easeProgress(ease: Ease, u: number): number {
   if (ease === 'linear') return u;
   if (ease === 'hold') return 0;
+  if (typeof ease === 'string') return NAMED_EASE_FNS[ease](u);
   return cubicBezier(ease[0], ease[1], ease[2], ease[3], u);
 }
 
@@ -163,7 +204,7 @@ export function baseValue(prop: Prop, t: number): PropValue {
 /** Full value of a property at comp time t, including wiggle and clamping. */
 export function evalProp(prop: Prop, t: number): PropValue {
   let v = baseValue(prop, t);
-  if (prop.kind === 'path') return v;
+  if (prop.kind === 'path' || prop.kind === 'gradient') return v;
   if (prop.wiggle && prop.wiggle.amp !== 0) {
     const { freq, amp, seed } = prop.wiggle;
     const n = (axis: number) => (noise1(t * freq + seed * 17.3 + axis * 101.7) * 2 - 1) * amp;

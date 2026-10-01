@@ -4,10 +4,25 @@
 export type Vec2 = [number, number];
 export type RGB = [number, number, number]; // 0..255
 export type PropValue = number | number[];
-export type PropKind = 'number' | 'vec2' | 'color' | 'path';
+export type PropKind = 'number' | 'vec2' | 'color' | 'path' | 'gradient';
 
-/** Interpolation leaving a keyframe: linear, hold, or a CSS-style cubic bezier. */
-export type Ease = 'linear' | 'hold' | [number, number, number, number];
+/** Procedural easing curves a single cubic bezier cannot express (bounces, springs, steps). */
+export const NAMED_EASES = [
+  'bounceOut',
+  'bounceIn',
+  'bounceInOut',
+  'elasticOut',
+  'elasticIn',
+  'elasticInOut',
+  'springOut',
+  'steps4',
+  'steps8',
+  'steps16',
+] as const;
+export type NamedEase = (typeof NAMED_EASES)[number];
+
+/** Interpolation leaving a keyframe: linear, hold, a CSS-style cubic bezier, or a named curve. */
+export type Ease = 'linear' | 'hold' | [number, number, number, number] | NamedEase;
 
 export interface Keyframe {
   id: string;
@@ -134,6 +149,19 @@ export interface Effect {
   type: string;
   enabled: boolean;
   props: Record<string, Prop>;
+  /** The template that created this effect, so applying a new look can replace the old one. */
+  source?: string;
+}
+
+/**
+ * A text animator: a range selector over characters, words or lines, plus the properties applied
+ * to whatever the selector covers (position, scale, rotation, opacity, tracking, colour).
+ */
+export interface TextAnimator {
+  id: string;
+  name: string;
+  source?: string;
+  props: Record<string, Prop>;
 }
 
 export type MaskMode = 'none' | 'add' | 'subtract' | 'intersect';
@@ -174,6 +202,8 @@ export interface Layer {
   content: Record<string, Prop>;
   effects: Effect[];
   masks: Mask[];
+  /** Only used by text layers. */
+  animators: TextAnimator[];
   data: LayerData;
 }
 
@@ -211,7 +241,7 @@ export interface Project {
   counters: Record<string, number>;
 }
 
-export type PropGroup = 'transform' | 'content' | `fx:${string}` | `mask:${string}`;
+export type PropGroup = 'transform' | 'content' | `fx:${string}` | `mask:${string}` | `anim:${string}`;
 export interface PropRef {
   layerId: string;
   group: PropGroup;

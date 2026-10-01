@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { baseValue, cubicBezier, EASY_EASE, evalProp, setAnimated, setKeyAt } from './interp';
+import { baseValue, cubicBezier, easeProgress, EASY_EASE, evalProp, setAnimated, setKeyAt } from './interp';
+import { NAMED_EASES } from './types';
+import { EASING_PRESETS } from '../templates/easing';
 import { apply, invert, mul, rotation, scaling, translate } from './math';
 import { makeProp, createComp, createShape, createProject } from './factory';
 import { parseTimecode, timecode } from './time';
@@ -177,5 +179,69 @@ describe('motion paths', () => {
     setKeyAt(p, 0, 0, 1e-4);
     setKeyAt(p, 1, 10, 1e-4);
     expect(baseValue(p, 0.5)).toBe(5);
+  });
+});
+
+describe('named easing curves', () => {
+  it('every named curve starts at 0 and ends at 1', () => {
+    for (const name of NAMED_EASES) {
+      expect(easeProgress(name, 0)).toBeCloseTo(0, 6);
+      expect(easeProgress(name, 1)).toBeCloseTo(1, 6);
+    }
+  });
+  it('bounce stays within 0..1 and touches the floor repeatedly', () => {
+    let touches = 0;
+    let prev = 0;
+    for (let i = 0; i <= 200; i++) {
+      const v = easeProgress('bounceOut', i / 200);
+      expect(v).toBeGreaterThanOrEqual(-1e-9);
+      expect(v).toBeLessThanOrEqual(1 + 1e-9);
+      if (i > 5 && v < prev && v > 0.9) touches++;
+      prev = v;
+    }
+    expect(touches).toBeGreaterThan(0);
+  });
+  it('elastic overshoots past the target; bounce never does', () => {
+    let max = 0;
+    for (let i = 0; i <= 200; i++) max = Math.max(max, easeProgress('elasticOut', i / 200));
+    expect(max).toBeGreaterThan(1.05);
+  });
+  it('steps are stair-shaped and monotonic', () => {
+    const vals = Array.from({ length: 101 }, (_, i) => easeProgress('steps4', i / 100));
+    expect(new Set(vals.map((v) => v.toFixed(4))).size).toBe(4);
+    for (let i = 1; i < vals.length; i++) expect(vals[i]).toBeGreaterThanOrEqual(vals[i - 1]);
+  });
+  it('named curves drive keyframe interpolation', () => {
+    const p = makeProp('number', 'x', 0);
+    setKeyAt(p, 0, 0, 1e-4, 'bounceOut');
+    setKeyAt(p, 1, 100, 1e-4);
+    expect(baseValue(p, 0.5)).toBeCloseTo(100 * easeProgress('bounceOut', 0.5), 6);
+  });
+});
+
+describe('easing library', () => {
+  it('has unique ids and a good spread of curves', () => {
+    const ids = EASING_PRESETS.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(EASING_PRESETS.length).toBeGreaterThanOrEqual(45);
+    expect(new Set(EASING_PRESETS.map((e) => e.group)).size).toBeGreaterThanOrEqual(10);
+  });
+  it('bezier x control points stay in 0..1 (so time never runs backwards)', () => {
+    for (const e of EASING_PRESETS) {
+      if (Array.isArray(e.ease)) {
+        expect(e.ease[0]).toBeGreaterThanOrEqual(0);
+        expect(e.ease[0]).toBeLessThanOrEqual(1);
+        expect(e.ease[2]).toBeGreaterThanOrEqual(0);
+        expect(e.ease[2]).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+  it('every preset interpolates cleanly end to end', () => {
+    for (const e of EASING_PRESETS) {
+      if (e.ease === 'hold') continue;
+      expect(easeProgress(e.ease, 0)).toBeCloseTo(0, 5);
+      expect(easeProgress(e.ease, 1)).toBeCloseTo(1, 5);
+      for (let i = 0; i <= 20; i++) expect(Number.isFinite(easeProgress(e.ease, i / 20))).toBe(true);
+    }
   });
 });

@@ -112,7 +112,8 @@ function paintLayer(f: Frame, ctx: CanvasRenderingContext2D, l: Layer, t: number
 /** A fingerprint of everything that can change a layer's appearance between sub-frame samples. */
 function sampleKey(f: Frame, l: Layer, t: number): string {
   const m = worldMatrix(l, t, f.byId);
-  const vals = Object.values(l.content).map((p) => (p.keys.length || p.wiggle ? evalNum(p, t) : 0));
+  const animated = [...Object.values(l.content), ...l.animators.flatMap((a) => Object.values(a.props)), ...l.masks.flatMap((m) => Object.values(m.props))];
+  const vals = animated.map((p) => (p.keys.length || p.wiggle ? JSON.stringify(evalProp(p, t)) : 0));
   return m.map((x) => x.toFixed(4)).join(',') + '|' + vals.join(',');
 }
 

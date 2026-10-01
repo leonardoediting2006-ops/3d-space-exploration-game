@@ -325,3 +325,40 @@ describe('easing a Hold keyframe', () => {
     void id;
   });
 });
+
+describe('easing presets', () => {
+  it('applies to selected keyframes only, skipping the last one', () => {
+    const id = A.addSolid({ name: 'A' });
+    const l = layers()[0];
+    for (const [t, v] of [[0, 0], [1, 50], [2, 100]] as const) setKeyAt(l.transform.rotation, t, v, 1e-3);
+    appStore.set({ project: structuredClone(appStore.get().project) });
+    const keys = layers()[0].transform.rotation.keys;
+    appStore.set({ selection: [id], selKeys: [keys[0].id, keys[2].id] });
+    expect(A.applyEasePreset('bounceOut')).toBe(1);
+    const k = layers()[0].transform.rotation.keys;
+    expect(k[0].ease).toBe('bounceOut');
+    expect(k[1].ease).toBe('linear');
+    expect(k[2].ease).toBe('linear');
+  });
+
+  it('with no keyframes selected it eases every keyframe on the selected layers', () => {
+    const id = A.addSolid({ name: 'A' });
+    const l = layers()[0];
+    for (const [t, v] of [[0, 0], [1, 50], [2, 100]] as const) setKeyAt(l.transform.rotation, t, v, 1e-3);
+    appStore.set({ project: structuredClone(appStore.get().project), selection: [id], selKeys: [] });
+    expect(A.applyEasePreset([0.5, 1, 0.9, 1])).toBe(2);
+    expect(layers()[0].transform.rotation.keys.slice(0, 2).every((k) => Array.isArray(k.ease))).toBe(true);
+  });
+
+  it('time-reversing a named curve swaps in and out', () => {
+    const id = A.addSolid({ name: 'A' });
+    const l = layers()[0];
+    setKeyAt(l.transform.rotation, 0, 0, 1e-3, 'bounceOut');
+    setKeyAt(l.transform.rotation, 1, 90, 1e-3);
+    appStore.set({ project: structuredClone(appStore.get().project) });
+    A.timeReverseKeys(layers()[0].transform.rotation.keys.map((k) => k.id));
+    expect(layers()[0].transform.rotation.keys[0].ease).toBe('bounceIn'); // the segment itself plays backwards
+    expect(layers()[0].transform.rotation.keys[1].ease).toBe('linear'); // the new last key has no segment
+    void id;
+  });
+});

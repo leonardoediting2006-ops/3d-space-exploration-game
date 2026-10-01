@@ -1,5 +1,6 @@
 import { uid } from './ids';
 import { ellipsePath, pathBounds, rectPath, translatePath } from './path';
+import type { TextAnimator } from './types';
 import type {
   Comp,
   Layer,
@@ -101,6 +102,7 @@ function baseLayer(type: LayerType, data: LayerData, o: BaseOpts, content: Recor
     content,
     effects: [],
     masks: [],
+    animators: [],
     data,
   };
 }
@@ -254,4 +256,52 @@ export function createMask(path: number[], name: string, mode: MaskMode = 'add')
 /** A rectangular or elliptical starter mask that covers the layer's bounds. */
 export function starterMaskPath(kind: 'rect' | 'ellipse', x: number, y: number, w: number, h: number): number[] {
   return kind === 'rect' ? rectPath(x, y, w, h) : ellipsePath(x + w / 2, y + h / 2, w / 2, h / 2);
+}
+
+export type AnimatorKind = 'blank' | 'opacity' | 'position' | 'scale' | 'rotation' | 'tracking' | 'color';
+
+/** The animator property keys the renderer reads. */
+export const ANIMATOR_KEYS = ['start', 'end', 'offset', 'smooth', 'units', 'shape', 'random', 'seed', 'position', 'scale', 'rotation', 'opacity', 'tracking', 'colorMix', 'color'] as const;
+
+/** A text animator with every property at its neutral value; `kind` pre-sets the one it is meant to drive. */
+export function createAnimator(name: string, kind: AnimatorKind = 'blank'): TextAnimator {
+  const props: Record<string, Prop> = {
+    start: makeProp('number', 'Range Start', 0, { unit: '%', min: -200, max: 300, step: 1, decimals: 1 }),
+    end: makeProp('number', 'Range End', 100, { unit: '%', min: -200, max: 300, step: 1, decimals: 1 }),
+    offset: makeProp('number', 'Range Offset', 0, { unit: '%', min: -300, max: 300, step: 1, decimals: 1 }),
+    smooth: makeProp('number', 'Smoothness', 100, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+    units: makeProp('number', 'Based On', 0, { options: ['Characters', 'Words', 'Lines'] }),
+    shape: makeProp('number', 'Shape', 0, { options: ['Square', 'Ramp Up', 'Ramp Down', 'Triangle', 'Round', 'Smooth'] }),
+    random: makeProp('number', 'Randomize Order', 0, { options: ['Off', 'On'] }),
+    seed: makeProp('number', 'Random Seed', 1, { min: 0, max: 9999, step: 1, decimals: 0 }),
+    position: makeProp('vec2', 'Position', [0, 0], { unit: 'px', step: 1, decimals: 1 }),
+    scale: makeProp('vec2', 'Scale', [100, 100], { unit: '%', step: 1, decimals: 1, link: true }),
+    rotation: makeProp('number', 'Rotation', 0, { unit: '°', step: 1, decimals: 1 }),
+    opacity: makeProp('number', 'Opacity', 100, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+    tracking: makeProp('number', 'Tracking', 0, { unit: 'px', step: 0.5, decimals: 1 }),
+    colorMix: makeProp('number', 'Color Amount', 0, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+    color: makeProp('color', 'Fill Color', [255, 90, 90]),
+  };
+  const a: TextAnimator = { id: uid('anim'), name, props };
+  switch (kind) {
+    case 'opacity':
+      props.opacity.value = 0;
+      break;
+    case 'position':
+      props.position.value = [0, -60];
+      break;
+    case 'scale':
+      props.scale.value = [0, 0];
+      break;
+    case 'rotation':
+      props.rotation.value = 90;
+      break;
+    case 'tracking':
+      props.tracking.value = 24;
+      break;
+    case 'color':
+      props.colorMix.value = 100;
+      break;
+  }
+  return a;
 }

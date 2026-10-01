@@ -1,6 +1,6 @@
 import { getEffectDef } from './effectDefs';
-import { makeTransform } from './factory';
-import { BLEND_MODES, MATTE_MODES, TRANSFORM_KEYS, type Comp, type Layer, type Project, type Prop } from './types';
+import { ANIMATOR_KEYS, makeTransform } from './factory';
+import { BLEND_MODES, MATTE_MODES, NAMED_EASES, TRANSFORM_KEYS, type Comp, type Layer, type Project, type Prop } from './types';
 
 const FORMAT = 'keyframe-studio';
 const VERSION = 1;
@@ -37,6 +37,10 @@ function checkValue(kind: Prop['kind'], v: unknown, what: string): void {
     if (!isNum(v)) fail(`${what} must be a number`);
     return;
   }
+  if (kind === 'gradient') {
+    if (!Array.isArray(v) || v.length % 4 !== 0 || v.length < 8 || v.length > 4 * 64 || !v.every(isNum)) fail(`${what} must be a list of gradient stops`);
+    return;
+  }
   if (kind === 'path') {
     if (!Array.isArray(v) || v.length % 6 !== 0 || v.length > 6 * 5000 || !v.every(isNum)) fail(`${what} must be a list of path vertices`);
     return;
@@ -47,7 +51,7 @@ function checkValue(kind: Prop['kind'], v: unknown, what: string): void {
 
 function checkProp(p: unknown, what: string): Prop {
   if (!isObj(p)) return fail(`${what} is not an object`);
-  if (p.kind !== 'number' && p.kind !== 'vec2' && p.kind !== 'color' && p.kind !== 'path') fail(`${what} has an unknown kind`);
+  if (p.kind !== 'number' && p.kind !== 'vec2' && p.kind !== 'color' && p.kind !== 'path' && p.kind !== 'gradient') fail(`${what} has an unknown kind`);
   const kind = p.kind as Prop['kind'];
   str(p.label, `${what}.label`);
   checkValue(kind, p.value, `${what}.value`);
@@ -61,7 +65,7 @@ function checkProp(p: unknown, what: string): Prop {
     last = k.t as number;
     checkValue(kind, k.v, `${what} keyframe value`);
     const e = k.ease;
-    const ok = e === 'linear' || e === 'hold' || (Array.isArray(e) && e.length === 4 && e.every(isNum));
+    const ok = e === 'linear' || e === 'hold' || (typeof e === 'string' && (NAMED_EASES as readonly string[]).includes(e)) || (Array.isArray(e) && e.length === 4 && e.every(isNum));
     if (!ok) fail(`${what} keyframe ease`);
     for (const t of [k.sIn, k.sOut]) {
       if (t !== undefined && !(Array.isArray(t) && t.length === 2 && t.every(isNum))) fail(`${what} keyframe motion-path tangent`);
@@ -104,6 +108,13 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
       if (!['none', 'add', 'subtract', 'intersect'].includes(String(m.mode))) fail(`${what} mask mode`);
       if (!isObj(m.props)) return fail(`${what} mask props`);
       for (const k of ['path', 'feather', 'opacity', 'expansion']) checkProp((m.props as Record<string, unknown>)[k], `${what} mask ${k}`);
+    }
+  }
+  if (l.animators !== undefined) {
+    if (!Array.isArray(l.animators) || l.animators.length > 50) fail(`${what}.animators`);
+    for (const a of l.animators as unknown[]) {
+      if (!isObj(a) || typeof a.id !== 'string' || typeof a.name !== 'string' || !isObj(a.props)) return fail(`${what} has a bad text animator`);
+      for (const k of ANIMATOR_KEYS) checkProp((a.props as Record<string, unknown>)[k], `${what} animator ${k}`);
     }
   }
   if (!isObj(l.data)) return fail(`${what}.data`);
@@ -202,6 +213,7 @@ function repairProject(project: Project): void {
       const fresh = makeTransform();
       for (const k of TRANSFORM_KEYS) l.transform[k] = { ...fresh[k], ...l.transform[k] };
       l.masks ??= [];
+      l.animators ??= [];
       if (l.data.type === 'shape') l.data.closed ??= true;
     }
   }

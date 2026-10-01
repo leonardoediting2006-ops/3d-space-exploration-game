@@ -25,6 +25,7 @@ import {
   moveLayersInTime,
   removeEffect,
   removeMask,
+  removeTextAnimator,
   selectKeys,
   selectLayers,
   setEffectEnabled,
@@ -46,7 +47,8 @@ import {
 } from '../state/actions';
 import { appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp, useTime } from '../state/store';
 import { EaseEditor } from './EaseEditor';
-import { PropEditor, useTimeIf } from './fields';
+import { useTimeIf } from './fields';
+import { PropEditor } from './PropEditor';
 
 const LEFT_W = 600;
 const RULER_H = 30;
@@ -55,7 +57,7 @@ const ROW_PROP = 24;
 
 type Row =
   | { kind: 'layer'; id: string; layer: Layer; index: number }
-  | { kind: 'group'; id: string; layer: Layer; label: string; depth: number; open: boolean; fxId?: string; maskId?: string }
+  | { kind: 'group'; id: string; layer: Layer; label: string; depth: number; open: boolean; fxId?: string; maskId?: string; animId?: string }
   | { kind: 'prop'; id: string; layer: Layer; group: PropGroup; propKey: string; prop: Prop; depth: number };
 
 const rowHeight = (r: Row) => (r.kind === 'layer' ? ROW_LAYER : ROW_PROP);
@@ -70,6 +72,7 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
     for (const [k, p] of Object.entries(layer.content)) all.push({ group: 'content', key: k, prop: p, path: `content.${k}` });
     for (const fx of layer.effects) for (const [k, p] of Object.entries(fx.props)) all.push({ group: `fx:${fx.id}`, key: k, prop: p, path: `fx.${fx.id}.${k}` });
     for (const m of layer.masks) for (const [k, p] of Object.entries(m.props)) all.push({ group: `mask:${m.id}`, key: k, prop: p, path: `mask.${m.id}.${k}` });
+    for (const a of layer.animators) for (const [k, p] of Object.entries(a.props)) all.push({ group: `anim:${a.id}`, key: k, prop: p, path: `anim.${a.id}.${k}` });
 
     if (filter) {
       for (const a of all) {
@@ -102,6 +105,19 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
           const fOpen = expanded[fId] ?? true;
           rows.push({ kind: 'group', id: fId, layer, label: getEffectDef(fx.type)?.name ?? fx.type, depth: 2, open: fOpen, fxId: fx.id });
           if (fOpen) for (const [k, p] of Object.entries(fx.props)) rows.push({ kind: 'prop', id: `${layer.id}:fx.${fx.id}.${k}`, layer, group: `fx:${fx.id}`, propKey: k, prop: p, depth: 3 });
+        }
+      }
+    }
+    if (layer.animators.length) {
+      const aId = `${layer.id}:animators`;
+      const aOpen = expanded[aId] ?? true;
+      rows.push({ kind: 'group', id: aId, layer, label: 'Animators', depth: 1, open: aOpen });
+      if (aOpen) {
+        for (const a of layer.animators) {
+          const gId = `${layer.id}:anim:${a.id}`;
+          const gOpen = expanded[gId] ?? true;
+          rows.push({ kind: 'group', id: gId, layer, label: a.name, depth: 2, open: gOpen, animId: a.id });
+          if (gOpen) for (const [k, p] of Object.entries(a.props)) rows.push({ kind: 'prop', id: `${layer.id}:anim.${a.id}.${k}`, layer, group: `anim:${a.id}`, propKey: k, prop: p, depth: 3 });
         }
       }
     }
@@ -275,7 +291,7 @@ export function Timeline() {
   const propMenu = (e: React.MouseEvent, row: Extract<Row, { kind: 'prop' }>) => {
     const { layer, group, propKey, prop } = row;
     const items: MenuItem[] = [];
-    if (prop.kind !== 'color' && prop.kind !== 'path' && !prop.options) {
+    if (prop.kind !== 'color' && prop.kind !== 'path' && prop.kind !== 'gradient' && !prop.options) {
       items.push(
         prop.wiggle
           ? { label: 'Remove Wiggle', onClick: () => setWiggle(layer.id, group, propKey, null) }
@@ -663,7 +679,7 @@ function typeGlyph(t: Layer['type']): string {
 }
 
 function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
-  const { layer, fxId, maskId } = row;
+  const { layer, fxId, maskId, animId } = row;
   const fx = fxId ? layer.effects.find((e) => e.id === fxId) : undefined;
   const mask = maskId ? layer.masks.find((m) => m.id === maskId) : undefined;
   const activeMask = useApp((s) => s.activeMask);
@@ -700,6 +716,11 @@ function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
             ✕
           </button>
         </>
+      )}
+      {animId && (
+        <button className="sw danger" title="Remove animator" onClick={() => removeTextAnimator(layer.id, animId)}>
+          ✕
+        </button>
       )}
       {fx && (
         <button className="sw danger" title="Remove effect" onClick={() => removeEffect(layer.id, fx.id)}>
