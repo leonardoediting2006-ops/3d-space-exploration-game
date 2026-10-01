@@ -2,16 +2,19 @@ import { useMemo } from 'react';
 import { gradientCss } from '../core/gradient';
 import type { Layer } from '../core/types';
 import { toggleFavorite, useFavorites } from '../state/favorites';
+import { deletePreset, renamePreset, useUserPresets } from '../state/presets';
 import { applyGradient, applyLibraryItem, LIB_MIME } from '../state/templateActions';
 import { appStore, useActiveComp, useApp } from '../state/store';
-import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, findLibraryItem, type LibraryItem } from '../templates';
+import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, findLibraryItem, userItems, type LibraryItem } from '../templates';
 import { presetGradient } from '../templates/gradients';
 import { templateSource, type LibraryCategory } from '../templates/types';
 import { EaseThumb } from './EaseThumb';
 import { Icon } from './Icon';
+import { NamePrompt } from './NamePrompt';
+import { useAnchor } from './Popover';
 import { TemplateThumb } from './TemplateThumb';
 
-type Tab = LibraryCategory | 'favorites';
+type Tab = LibraryCategory | 'favorites' | 'mine';
 
 const HINTS: Record<LibraryCategory, string> = {
   textStyle: 'Click a style to apply it to the selected text. With nothing selected, a new text layer is made.',
@@ -55,6 +58,39 @@ const dragProps = (item: LibraryItem) => ({
   },
 });
 
+/** Rename and delete buttons for a card that is one of the user's own presets. */
+function PresetTools({ item }: { item: LibraryItem }) {
+  const namer = useAnchor();
+  return (
+    <>
+      <span className="tpl-tools">
+        <button
+          className="tpl-tool"
+          title="Rename"
+          onClick={(e) => {
+            e.stopPropagation();
+            namer.toggle(e);
+          }}
+        >
+          <Icon name="edit" size={11} />
+        </button>
+        <button
+          className="tpl-tool"
+          title="Delete this preset"
+          onClick={(e) => {
+            e.stopPropagation();
+            deletePreset(item.id);
+          }}
+          data-testid="preset-delete"
+        >
+          <Icon name="trash" size={11} />
+        </button>
+      </span>
+      {namer.anchor && <NamePrompt anchor={namer.anchor} title="Rename preset" initial={item.name} action="Rename" onSave={(n) => renamePreset(item.id, n)} onClose={namer.close} />}
+    </>
+  );
+}
+
 function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
   if (item.category === 'gradient') {
     const css = gradientCss(presetGradient(item.gradient), 90);
@@ -94,6 +130,7 @@ function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
           <Icon name="check" size={11} />
         </span>
       )}
+      {item.id.startsWith('user.') && <PresetTools item={item} />}
       <Star id={item.id} />
     </div>
   );
@@ -112,18 +149,22 @@ export function LibraryPanel() {
   const firstId = useApp((s) => s.selection[0]);
   const layer = comp.layers.find((l) => l.id === firstId);
 
-  const favItems = useMemo(() => favorites.map((id) => findLibraryItem(id)).filter((i): i is LibraryItem => !!i), [favorites]);
+  const mine = useUserPresets();
+  const favItems = useMemo(() => favorites.map((id) => findLibraryItem(id)).filter((i): i is LibraryItem => !!i), [favorites, mine]);
+  const mineItems = useMemo(() => userItems(), [mine]);
 
   const sections = useMemo(() => {
-    if (needle) return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(LIBRARY[c].filter((i) => matches(i, needle))) })).filter((s) => s.groups.length);
-    if (cat === 'favorites') {
-      return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(favItems.filter((i) => i.category === c)) })).filter((s) => s.groups.length);
+    if (needle) return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems([...mineItems.filter((i) => i.category === c), ...LIBRARY[c]].filter((i) => matches(i, needle))) })).filter((s) => s.groups.length);
+    if (cat === 'favorites' || cat === 'mine') {
+      const source = cat === 'mine' ? mineItems : favItems;
+      return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(source.filter((i) => i.category === c)) })).filter((s) => s.groups.length);
     }
     return [{ category: cat, groups: groupItems(LIBRARY[cat]) }];
-  }, [cat, needle, favItems]);
+  }, [cat, needle, favItems, mineItems]);
 
   const shown = sections.reduce((n, s) => n + s.groups.reduce((m, [, items]) => m + items.length, 0), 0);
   const tabs: { id: Tab; label: string; count: number }[] = [
+    ...(mineItems.length ? [{ id: 'mine' as const, label: 'My presets', count: mineItems.length }] : []),
     ...(favorites.length ? [{ id: 'favorites' as const, label: '♥ Favourites', count: favItems.length }] : []),
     ...LIBRARY_ORDER.map((c) => ({ id: c as Tab, label: CATEGORY_LABELS[c], count: LIBRARY[c].length })),
   ];
@@ -142,7 +183,8 @@ export function LibraryPanel() {
           </div>
         )}
       </div>
-      {!needle && cat !== 'favorites' && <div className="hint lib-hint">{HINTS[cat]}</div>}
+      {!needle && cat !== 'favorites' && cat !== 'mine' && <div className="hint lib-hint">{HINTS[cat]}</div>}
+      {!needle && cat === 'mine' && <div className="hint lib-hint">Animations and looks you saved. Open an animation's ⋯ menu (or the heart in Effects) to save more; they work like any template.</div>}
       {!needle && cat === 'favorites' && <div className="hint lib-hint">Your starred templates. Hover a card and click the heart to add or remove.</div>}
       {needle && (
         <div className="hint lib-hint">
@@ -151,7 +193,7 @@ export function LibraryPanel() {
       )}
       {sections.map((sec) => (
         <div key={sec.category}>
-          {(needle || cat === 'favorites') && <h3 className="lib-cat-title">{CATEGORY_LABELS[sec.category]}</h3>}
+          {(needle || cat === 'favorites' || cat === 'mine') && <h3 className="lib-cat-title">{CATEGORY_LABELS[sec.category]}</h3>}
           {sec.groups.map(([group, items]) => (
             <section key={group}>
               <h4>{group}</h4>

@@ -2,7 +2,7 @@
 // instance id; these functions then retime, rescale, re-ease or remove that whole unit. All of
 // them are pure edits of a layer, so they run inside `commit` and unit tests alike.
 import { uid } from './ids';
-import { sortKeys } from './interp';
+import { baseValue, sortKeys } from './interp';
 import { layerProps } from './props';
 import type { AnimInstance, AnimSlot, Ease, Keyframe, Layer, Prop, PropValue } from './types';
 
@@ -127,8 +127,29 @@ export function adoptNew(layer: Layer, before: Snapshot, instId: string): number
   return n;
 }
 
-export function makeInstance(template: string, name: string, kind: AnimInstance['kind'], slot: AnimSlot): AnimInstance {
-  return { id: uid('inst'), template, name, kind, slot, strength: 1 };
+export const REST_KEYS = ['position', 'scale', 'rotation', 'opacity'] as const;
+export type RestKey = (typeof REST_KEYS)[number];
+
+/** The transform values the layer has at time `t`, to remember as what an animation returns to. */
+export function captureRest(layer: Layer, t: number): NonNullable<AnimInstance['rest']> {
+  const out: NonNullable<AnimInstance['rest']> = {};
+  for (const k of REST_KEYS) {
+    const v = baseValue(layer.transform[k], t);
+    out[k] = Array.isArray(v) ? [...v] : v;
+  }
+  return out;
+}
+
+/** The value `prop` rests at for this animation: the remembered one for transform properties, else its stored value. */
+export function restFor(layer: Layer, inst: AnimInstance, prop: Prop): PropValue {
+  for (const k of REST_KEYS) if (layer.transform[k] === prop && inst.rest?.[k] !== undefined) return inst.rest[k]!;
+  return prop.value;
+}
+
+export function makeInstance(template: string, name: string, kind: AnimInstance['kind'], slot: AnimSlot, rest?: AnimInstance['rest']): AnimInstance {
+  const inst: AnimInstance = { id: uid('inst'), template, name, kind, slot, strength: 1 };
+  if (rest) inst.rest = rest;
+  return inst;
 }
 
 /** Remove an instance and everything it created. */
@@ -235,7 +256,7 @@ export function setInstanceStrength(layer: Layer, instId: string, strength: numb
   for (const { prop, key } of instanceKeys(layer, instId)) {
     if (prop.kind !== 'number' && prop.kind !== 'vec2') continue;
     if (selectors.has(prop)) continue;
-    key.v = clampTo(prop, scaleAround(key.v, prop.value, f));
+    key.v = clampTo(prop, scaleAround(key.v, restFor(layer, inst, prop), f));
     if (key.sIn) key.sIn = [key.sIn[0] * f, key.sIn[1] * f];
     if (key.sOut) key.sOut = [key.sOut[0] * f, key.sOut[1] * f];
   }

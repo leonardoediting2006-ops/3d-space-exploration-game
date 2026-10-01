@@ -44,21 +44,15 @@ import {
 import { appStore, beginGesture, endGesture, useActiveComp, useApp } from '../state/store';
 import { AnimateSection } from './AnimCard';
 import { CompInspector } from './CompInspector';
+import { saveLookPreset } from '../state/presets';
 import { NumberField } from './fields';
+import { NamePrompt } from './NamePrompt';
+import { GENERIC_FONTS, installedFonts } from './fonts';
 import { Icon, LAYER_ICON, type IconName } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
 import { EffectPicker } from './Pickers';
 import { PropRow } from './PropRow';
 import { Field, Section } from './Section';
-
-const FONTS = [
-  { name: 'Sans-serif', css: 'Inter, Helvetica, Arial, sans-serif' },
-  { name: 'Serif', css: 'Georgia, "Times New Roman", serif' },
-  { name: 'Monospace', css: '"SF Mono", Menlo, Consolas, monospace' },
-  { name: 'Impact', css: 'Impact, "Arial Black", sans-serif' },
-  { name: 'Rounded', css: '"Trebuchet MS", "Segoe UI", sans-serif' },
-  { name: 'Cursive', css: '"Comic Sans MS", "Brush Script MT", cursive' },
-];
 
 type CompLite = Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
 
@@ -292,13 +286,24 @@ function SourceSection({ layer, comp }: { layer: Layer; comp: Comp }) {
             data-testid="text-input"
           />
           <Field label="Font">
-            <select className="mini-select wide" value={d.font} onChange={(e) => set({ font: e.target.value })}>
-              {FONTS.map((f) => (
-                <option key={f.css} value={f.css}>
-                  {f.name}
-                </option>
-              ))}
-              {!FONTS.some((f) => f.css === d.font) && <option value={d.font}>{d.font.split(',')[0]}</option>}
+            <select className="mini-select wide" value={d.font} onChange={(e) => set({ font: e.target.value })} data-testid="font-select">
+              <optgroup label="Everywhere">
+                {GENERIC_FONTS.map((f) => (
+                  <option key={f.css} value={f.css}>
+                    {f.name}
+                  </option>
+                ))}
+              </optgroup>
+              {installedFonts().length > 0 && (
+                <optgroup label="Installed on this computer">
+                  {installedFonts().map((f) => (
+                    <option key={f.css} value={f.css}>
+                      {f.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {![...GENERIC_FONTS, ...installedFonts()].some((f) => f.css === d.font) && <option value={d.font}>{d.font.split(',')[0].replace(/"/g, '')}</option>}
             </select>
           </Field>
           <Field label="Style">
@@ -385,17 +390,26 @@ function TrimSection({ layer, comp }: { layer: Layer; comp: Comp }) {
 
 function EffectsSection({ layer, comp }: { layer: Layer; comp: Comp }) {
   const picker = useAnchor();
+  const namer = useAnchor();
   return (
     <Section
       id="effects"
       title="Effects"
       count={layer.effects.length}
       actions={
-        <button className="add-chip" onClick={picker.toggle} data-testid="add-effect" title="Add an effect or a ready-made look">
-          <Icon name="plus" size={12} /> Add
-        </button>
+        <>
+          {layer.effects.length > 0 && (
+            <button className="icon-btn" onClick={namer.toggle} title="Save these effects as a look you can reuse" data-testid="save-look">
+              <Icon name="heart" size={13} />
+            </button>
+          )}
+          <button className="add-chip" onClick={picker.toggle} data-testid="add-effect" title="Add an effect or a ready-made look">
+            <Icon name="plus" size={12} /> Add
+          </button>
+        </>
       }
     >
+      {namer.anchor && <NamePrompt anchor={namer.anchor} title="Save these effects as a look" initial="My look" onSave={(name) => saveLookPreset(layer, name)} onClose={namer.close} />}
       {layer.effects.length === 0 && (
         <div className="empty-hint">
           Blur, glow, colour grading and more.

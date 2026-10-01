@@ -152,6 +152,40 @@ describe('animations on layers that already have keyframes', () => {
   });
 });
 
+describe('layers whose position is already keyframed', () => {
+  it('rest at the value they actually have, not the stored one, when strength changes', () => {
+    const { ctx, shape } = setup(3);
+    // the layer's own move: its stored value stays at the centre, but it rests at (900, 600)
+    setKeyAt(shape.transform.position, 0, [100, 100], 0.01, 'linear');
+    setKeyAt(shape.transform.position, 2, [900, 600], 0.01, 'linear');
+    expect(shape.transform.position.value).toEqual([960, 540]);
+    applyTemplateToLayer(shape, tpl('motion.slideInLeft'), ctx);
+    const inst = shape.anims[0];
+    expect(inst.rest?.position).toEqual([900, 600]);
+    const dist = 900 - evalVec(shape.transform.position, 3)[0];
+    setInstanceStrength(shape, inst.id, 0.5);
+    expect(900 - evalVec(shape.transform.position, 3)[0]).toBeCloseTo(dist / 2, 6);
+    expect(evalVec(shape.transform.position, 4)).toEqual([900, 600]); // still lands where it rests
+    setInstanceStrength(shape, inst.id, 1);
+    expect(900 - evalVec(shape.transform.position, 3)[0]).toBeCloseTo(dist, 6);
+  });
+
+  it('survives a save, and old files without it fall back to the stored value', () => {
+    const { project, ctx, shape } = setup(1);
+    applyTemplateToLayer(shape, tpl('motion.slideInLeft'), ctx);
+    const raw = JSON.parse(serializeProject(project, {}));
+    const layer = (Object.values(raw.project.comps)[0] as { layers: { anims: { rest?: unknown }[] }[] }).layers[0];
+    expect(layer.anims[0].rest).toBeDefined();
+    delete layer.anims[0].rest;
+    const back = parseProject(JSON.stringify(raw)).project;
+    const old = Object.values(back.comps)[0].layers[0];
+    setInstanceStrength(old, old.anims[0].id, 0.5);
+    expect(old.anims[0].strength).toBe(0.5);
+    layer.anims[0].rest = { position: 'nope' };
+    expect(() => parseProject(JSON.stringify(raw))).toThrow(/rest/);
+  });
+});
+
 describe('editing an applied animation', () => {
   it('start moves every keyframe together', () => {
     const { ctx, shape } = setup(1);

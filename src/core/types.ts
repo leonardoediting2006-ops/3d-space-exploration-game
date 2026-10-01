@@ -196,6 +196,12 @@ export interface AnimInstance {
   slot: AnimSlot;
   /** 1 = as designed. Scales how far the animation strays from the layer's resting values. */
   strength: number;
+  /**
+   * The layer's own position, scale, rotation and opacity at the moment the animation was applied,
+   * before it: what the animation returns to, and what Strength scales around. (A layer that is
+   * already keyframed has a resting value that differs from the property's stored value.)
+   */
+  rest?: Partial<Record<'position' | 'scale' | 'rotation' | 'opacity', PropValue>>;
 }
 
 export type MaskMode = 'none' | 'add' | 'subtract' | 'intersect';

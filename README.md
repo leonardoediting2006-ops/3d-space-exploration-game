@@ -22,6 +22,7 @@ The interface is built around three ideas: *everything you select is editable in
 - **Inspector** (right panel). Select a layer and every property is there — transform, text or shape settings, applied animations, effects, letter animators, masks — as sliders, scrub fields and a colour picker. Bounded values are filled sliders (drag, click to type, arrow keys to nudge); changed values show a reset button; the diamond animates a property and ◂ ◆ ▸ step between its keyframes. Expand any animated property to get a **value graph** (drag keys in time and value) and a **keyframe list** with each key's time, value and easing curve, plus *Repeat* and *Wiggle*. With nothing selected it shows the composition (size presets, frame rate, duration, background).
 - **Animate** (in the Inspector). Everything applied from the library as an animation is remembered as a unit, grouped as **In / Out / Loop / Emphasis**. Each has **Start**, **Length**, **Strength** (how far it strays from the layer's resting values), **Easing** (any curve, edited with draggable handles or picked from 53 presets) and, for text, *Animate by* characters / words / lines and *Order*. Picking another In or Out animation replaces the old one; a text entrance, loop and exit can all coexist. The same blocks appear on the **timeline** as clips you can drag to move or resize to retime.
 - **Library** (right panel). 333 templates with live thumbnails (hover to play). Click to apply at the playhead, or **drag onto a layer** in the viewer or timeline — entrances land at the layer's start, exits end as it ends. Star favourites with the heart; a tick marks what's already on the selected layer.
+- **My presets.** Tuned an animation the way you like it? Open its ⋯ menu → *Save as preset…* (or use the heart in *Effects* to save a whole effect stack as a look). It joins the Library under **My presets**, the Animate pickers, drag-and-drop and Ctrl K, and applies relative to whichever layer you give it. Presets live in your browser's storage.
 - **Ctrl K palette.** Commands, effects, layers and the whole library in one search box (“neon”, “align”, “blur”, “slide”…).
 - **Viewer.** Smart guides snap to the composition's edges and centre and to other layers (hold Alt to bypass); right-click for layer actions; an **Add** menu creates text, shapes, solids, images and compositions; align and distribute buttons work on one layer (to the canvas) or several (to each other); **Stagger** offsets entrances across selected layers.
 
@@ -43,6 +44,7 @@ The interface is built around three ideas: *everything you select is editable in
 **Editing**
 - One **Inspector** for everything selected, with sliders, reset-to-default, per-keyframe time/value/easing, a value graph, loop and wiggle.
 - **Library animations are live objects**: retime, rescale, re-ease, replace or remove them at any time, from the Inspector or as clips on the timeline.
+- **My presets**: save any tuned animation or effect stack and reuse it.
 - **Command palette** (Ctrl K), **drag-and-drop** from the library onto layers, **smart snapping guides**, align / distribute / stagger, a right-click menu, favourites, and a custom **colour picker** with the project's own colours.
 
 **Layers**
@@ -146,7 +148,7 @@ Things a full compositing suite has that this does **not**:
 - Text animators cover per-letter transforms, opacity, spacing and colour, but not per-letter blur, wiggle selectors or text on a path.
 - Shape layers hold one shape each: no shape groups, repeaters or merge/boolean paths. Gradients are applied with the Gradient Fill effect, so they colour the whole layer (fill and stroke together).
 - No full-size graph editor: each animated property has a value graph and per-segment bezier easing in the Inspector, but no speed graph, and no time remapping or stretch.
-- You cannot yet save your own animations or looks as library presets (every *application* of a library item is fully editable, but the catalogue itself is fixed).
+- Your presets are stored in this browser only (no import/export or sync yet).
 - The Inspector edits one layer at a time. Alignment, distribution, staggering and animations or effects added from the Inspector's pickers apply to every selected layer; individual property edits do not.
 - No motion tracking, stabilisation, roto brush, or colour management.
 - No plugin/effect SDK, and no import of other applications' project files.

@@ -38,7 +38,7 @@ import {
 } from '../state/actions';
 import { applyLibraryItem } from '../state/templateActions';
 import { activeComp, appStore, redo, timeStore, toast, undo } from '../state/store';
-import { CATEGORY_LABELS, LIBRARY, LIBRARY_ORDER } from '../templates';
+import { CATEGORY_LABELS, LIBRARY, LIBRARY_ORDER, userItems } from '../templates';
 import { OPEN_PROJECT_EVENT } from './MenuBar';
 
 export interface Command {
@@ -160,6 +160,7 @@ export function buildCommands(): Command[] {
       add(CATEGORY_LABELS[cat], `${verb} ${item.name}`, () => applyLibraryItem(item), { keywords: `${item.group} ${item.id}`, id: `lib:${item.id}` });
     }
   }
+  for (const item of userItems()) add('My presets', `Apply ${item.name}`, () => applyLibraryItem(item), { keywords: 'mine saved custom', id: `lib:${item.id}` });
   return out;
 }
 
@@ -188,7 +189,7 @@ export function rememberCommand(id: string): void {
  * Score a command for a query. Every word of the query must appear somewhere in the title,
  * section or keywords; matches at the start of a word score higher, earlier matches higher still.
  */
-const SECTION_RANK = ['Add', 'Edit', 'Arrange', 'Keyframes', 'Playback', 'View', 'File', 'Help', 'Layers', 'Compositions', 'Effects', 'Text Styles', 'Text Animations', 'Motion', 'Looks', 'Gradients', 'Easing', 'Scenes'];
+const SECTION_RANK = ['Add', 'Edit', 'Arrange', 'Keyframes', 'Playback', 'View', 'File', 'Help', 'Layers', 'Compositions', 'My presets', 'Effects', 'Text Styles', 'Text Animations', 'Motion', 'Looks', 'Gradients', 'Easing', 'Scenes'];
 
 export function scoreCommand(cmd: Command, query: string): number {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);

@@ -344,6 +344,77 @@ try {
   const countAfter = await A((ks) => { const s = ks.appStore.get(); return s.project.comps[s.activeCompId].layers.length; });
   check('right-click → Duplicate works', countAfter === countBefore + 1, `${countBefore} -> ${countAfter}`);
 
+  // ---- my presets: save a tuned animation, reuse it, rename, delete, persist
+  await A((ks) => { ks.actions.selectLayers([]); const a = ks.actions.addShape('rect', [200, 200], [400, 400]); ks.actions.setLayerField(a, { name: 'PresetSrc' }); const b = ks.actions.addShape('rect', [200, 200], [1400, 700]); ks.actions.setLayerField(b, { name: 'PresetDst' }); ks.actions.selectLayers([a]); });
+  await setTime(0);
+  await page.click('[data-testid=tab-library]');
+  await page.click('.lib-cats >> text=Motion');
+  await page.click('[data-testid="tpl-motion.slideInLeft"]');
+  await page.click('[data-testid=toast-action]');
+  const srcCard = page.locator('[data-testid=slot-in] [data-testid=anim-card]');
+  const strengthSlider = srcCard.locator('.slider');
+  await strengthSlider.focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowLeft'); // 100% -> 50%
+  const srcLayer = await selected();
+  const srcDist = srcLayer.transform.position.value[0] - srcLayer.transform.position.keys[0].v[0];
+  await srcCard.locator('[title="More"]').click();
+  await page.click('.menu-item:has-text("Save as preset")');
+  await page.waitForSelector('[data-testid=name-prompt]');
+  await page.fill('[data-testid=name-input]', 'Gentle slide');
+  await page.click('[data-testid=name-save]');
+  await page.waitForTimeout(150);
+  check('saving shows a toast with a shortcut to My presets', /Gentle slide/.test(await page.textContent('[data-testid=toast]')));
+  await page.click('[data-testid=toast-action]');
+  check('the Library gets a My presets tab with the preset', (await page.locator('[data-testid="lib-cat-mine"]').count()) === 1 && (await page.locator('.tpl-card:has-text("Gentle slide")').count()) === 1);
+  await A((ks) => { const s = ks.appStore.get(); const l = s.project.comps[s.activeCompId].layers.find((x) => x.name === 'PresetDst'); ks.actions.selectLayers([l.id]); });
+  await page.click('.tpl-card:has-text("Gentle slide")');
+  const dst = await layerOf('PresetDst');
+  const dstDist = dst.transform.position.value[0] - dst.transform.position.keys[0].v[0];
+  check('applying it elsewhere reproduces the tuned distance', dst.anims.length === 1 && Math.abs(dstDist - srcDist) < 1, `${dstDist} vs ${srcDist}`);
+  check('and lands on the layer\'s own position', dst.transform.position.value[0] === 1400 && dst.transform.position.value[1] === 700);
+  const storedPresets = await page.evaluate(() => localStorage.getItem('keyframe-studio:presets'));
+  check('presets are stored in the browser', storedPresets?.includes('Gentle slide'), String(storedPresets).slice(0, 60));
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('gentle');
+  check('the palette offers saved presets first', /Gentle slide/.test(await page.locator('[data-testid=palette-item]').first().innerText()));
+  await page.keyboard.press('Escape');
+  await page.hover('.tpl-card:has-text("Gentle slide")');
+  await page.click('.tpl-card:has-text("Gentle slide") [title="Rename"]');
+  await page.fill('[data-testid=name-input]', 'Soft entrance');
+  await page.press('[data-testid=name-input]', 'Enter');
+  check('presets can be renamed', (await page.locator('.tpl-card:has-text("Soft entrance")').count()) === 1);
+  // looks: save an effect stack
+  await A((ks) => { const s = ks.appStore.get(); const l = s.project.comps[s.activeCompId].layers.find((x) => x.name === 'PresetSrc'); ks.actions.selectLayers([l.id]); ks.actions.addEffect([l.id], 'glow'); const fx = ks.appStore.get().project.comps[s.activeCompId].layers.find((x) => x.name === 'PresetSrc').effects[0]; ks.actions.setPropValue(l.id, `fx:${fx.id}`, 'radius', 66); });
+  await page.click('[data-testid=tab-inspector]');
+  await page.click('[data-testid=save-look]');
+  await page.fill('[data-testid=name-input]', 'Big glow');
+  await page.press('[data-testid=name-input]', 'Enter');
+  await A((ks) => { const s = ks.appStore.get(); const l = s.project.comps[s.activeCompId].layers.find((x) => x.name === 'PresetDst'); ks.actions.selectLayers([l.id]); });
+  await page.click('[data-testid=add-effect]');
+  await page.click('.picker-pop .seg button:has-text("Looks")');
+  await page.click('.picker-pop .pick-card:has-text("Big glow")');
+  const lookDst = await layerOf('PresetDst');
+  check('a saved look is offered in the effect picker and keeps its settings', lookDst.effects.some((e) => e.type === 'glow' && e.props.radius.value === 66), JSON.stringify(lookDst.effects.map((e) => e.type)));
+  await page.reload();
+  await page.waitForSelector('[data-testid=comp-canvas]');
+  await page.evaluate(() => window.__ks.appStore.set({ previewOnApply: false }));
+  await page.click('[data-testid=tab-library]');
+  check('and they are still there after a reload', (await page.locator('[data-testid="lib-cat-mine"]').count()) === 1);
+  await page.click('[data-testid="lib-cat-mine"]');
+  await page.hover('.tpl-card:has-text("Soft entrance")');
+  await page.click('.tpl-card:has-text("Soft entrance") [data-testid=preset-delete]');
+  check('deleting removes the preset', (await page.locator('.tpl-card:has-text("Soft entrance")').count()) === 0 && (await page.locator('.tpl-card:has-text("Big glow")').count()) === 1);
+  await page.hover('.tpl-card:has-text("Big glow")');
+  await page.click('.tpl-card:has-text("Big glow") [data-testid=preset-delete]');
+  check('and the tab goes when the last one is deleted', (await page.locator('[data-testid="lib-cat-mine"]').count()) === 0);
+  await page.evaluate(() => window.__ks.appStore.set({ previewOnApply: false }));
+
+  await page.evaluate(() => { const l = JSON.parse(localStorage.getItem('keyframe-studio:presets') ?? '[]'); localStorage.setItem('keyframe-studio:presets', JSON.stringify([...l, { id: 'user.evil', name: 'x', kind: 'motion', props: [{ target: { group: 'transform', key: 'position' }, keys: [{ t: 0, v: [1e999, 2], ease: 'linear' }] }] }, 'junk'])); });
+  await page.reload();
+  await page.waitForSelector('[data-testid=comp-canvas]');
+  check('a corrupted preset in storage is ignored without breaking the app', (await page.locator('[data-testid=comp-canvas]').count()) === 1);
+  await page.evaluate(() => window.__ks.appStore.set({ previewOnApply: false }));
+
   // ---- drag a template from the Library onto a layer
   await A((ks) => { ks.actions.selectLayers([]); const id = ks.actions.addShape('ellipse', [260, 260], [960, 540]); ks.actions.setLayerField(id, { name: 'DropMe' }); ks.actions.selectLayers([]); });
   await page.click('[data-testid=tab-library]');

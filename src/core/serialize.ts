@@ -127,6 +127,12 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
       if (!['in', 'out', 'loop', 'emph'].includes(String(a.slot))) fail(`${what} animation slot`);
       if (!['motion', 'textAnim', 'effect'].includes(String(a.kind))) fail(`${what} animation kind`);
       numIn(a.strength, `${what} animation strength`, 0.01, 10);
+      if (a.rest !== undefined) {
+        if (!isObj(a.rest)) fail(`${what} animation rest`);
+        for (const [k, v] of Object.entries(a.rest as Record<string, unknown>)) {
+          if (!['position', 'scale', 'rotation', 'opacity'].includes(k) || !(isNum(v) || (Array.isArray(v) && v.length === 2 && v.every(isNum)))) fail(`${what} animation rest`);
+        }
+      }
     }
   }
   if (!isObj(l.data)) return fail(`${what}.data`);

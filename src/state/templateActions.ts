@@ -1,4 +1,4 @@
-import { adoptNew, alignInstanceEnd, instanceSpan, makeInstance, pruneInstances, removeInstance, setInstanceStart, snapshot } from '../core/anims';
+import { adoptNew, alignInstanceEnd, captureRest, instanceSpan, makeInstance, pruneInstances, removeInstance, setInstanceStart, snapshot } from '../core/anims';
 import { createSolid, nextCount } from '../core/factory';
 import { setAnimated } from '../core/interp';
 import { createEffect } from '../core/effectDefs';
@@ -40,8 +40,9 @@ export function applyTemplateToLayer(layer: Layer, tpl: LayerTemplate, ctx: Temp
     if (a.template === tpl.id || sameSlot) removeInstance(layer, a.id);
   }
   const before = snapshot(layer);
+  const rest = captureRest(layer, ctx.t); // what the layer looks like before the animation touches it
   tpl.apply(layer, ctx);
-  const inst = makeInstance(tpl.id, tpl.name, tpl.kind as 'motion' | 'textAnim' | 'effect', slot);
+  const inst = makeInstance(tpl.id, tpl.name, tpl.kind as 'motion' | 'textAnim' | 'effect', slot, rest);
   if (adoptNew(layer, before, inst.id) > 0) layer.anims.push(inst);
   pruneInstances(layer);
 }

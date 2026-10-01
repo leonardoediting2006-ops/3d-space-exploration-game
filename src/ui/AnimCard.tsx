@@ -7,7 +7,9 @@ import { NumberField, SliderField } from './fields';
 import { Icon } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
 import { AnimPicker } from './Pickers';
+import { NamePrompt } from './NamePrompt';
 import { Field, Section } from './Section';
+import { saveAnimationPreset } from '../state/presets';
 
 const SLOT_ICON: Record<AnimSlot, 'startOfLayer' | 'endOfLayer' | 'loop' | 'sparkle'> = { in: 'startOfLayer', out: 'endOfLayer', loop: 'loop', emph: 'sparkle' };
 
@@ -52,6 +54,7 @@ function AnimCard({ layer, comp, inst }: { layer: Layer; comp: Pick<Comp, 'fps' 
   const [open, setOpen] = useState(true);
   const menu = useAnchor();
   const replace = useAnchor();
+  const namer = useAnchor();
   const span = instanceSpan(layer, inst.id);
   const timed = !!span && span.end - span.start > 1e-6;
   const ease = instanceEase(layer, inst.id);
@@ -68,7 +71,8 @@ function AnimCard({ layer, comp, inst }: { layer: Layer; comp: Pick<Comp, 'fps' 
           { label: 'End at the layer\'s last frame', icon: <Icon name="endOfLayer" />, run: () => alignAnim(layer.id, inst.id, 'end') },
         ]
       : []),
-    { label: 'Remove animation', icon: <Icon name="trash" />, run: () => removeAnim(layer.id, inst.id), danger: true, sep: true },
+    { label: 'Save as preset…', icon: <Icon name="heart" />, run: () => menu.anchor && namer.openAt(menu.anchor), sep: true },
+    { label: 'Remove animation', icon: <Icon name="trash" />, run: () => removeAnim(layer.id, inst.id), danger: true },
   ];
 
   return (
@@ -138,6 +142,7 @@ function AnimCard({ layer, comp, inst }: { layer: Layer; comp: Pick<Comp, 'fps' 
       )}
       {menu.anchor && <MenuPopover anchor={menu.anchor} onClose={menu.close} entries={entries} width={240} side={menu.anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} />}
       {replace.anchor && <AnimPicker layer={layer} slot={inst.slot} anchor={replace.anchor} onClose={replace.close} />}
+      {namer.anchor && <NamePrompt anchor={namer.anchor} title="Save as preset" initial={`${inst.name} (mine)`} onSave={(name) => saveAnimationPreset(layer, inst, name)} onClose={namer.close} />}
     </div>
   );
 }

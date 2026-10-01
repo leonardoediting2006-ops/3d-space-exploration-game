@@ -25,6 +25,8 @@ export interface LayerTemplate {
   previewDuration?: number;
   /** Backdrop for the thumbnail, for looks that would vanish on the default dark one. */
   previewBg?: [number, number, number];
+  /** Where its animation sits in a layer's life, when the group name does not say (your own presets). */
+  slot?: AnimSlot;
   /** Show the look on an adjustment layer over the sample scene (for whole-frame grades) instead of on each layer. */
   previewOn?: 'adjustment';
 }
@@ -64,7 +66,9 @@ const ANIMATED_LOOK_SLOT: Record<string, AnimSlot> = {
  * Where a template's animation sits in a layer's life, or null for looks and styles that are not
  * animations. Applying an In or Out animation replaces the layer's previous one of the same kind.
  */
-export function templateSlot(t: Pick<LayerTemplate, 'id' | 'kind' | 'group'>): AnimSlot | null {
+export function templateSlot(t: Pick<LayerTemplate, 'id' | 'kind' | 'group'> & { slot?: AnimSlot }): AnimSlot | null {
+  if (t.slot) return t.slot;
+  if (t.id.startsWith('user.')) return null;
   if (t.kind === 'effect') return ANIMATED_LOOK_SLOT[t.id] ?? null;
   if (t.kind === 'motion') return t.group === 'Enter' ? 'in' : t.group === 'Exit' ? 'out' : t.group === 'Emphasis' ? 'emph' : 'loop';
   if (t.kind === 'textAnim') return t.group === 'Reveal' || t.group === 'Entrance' ? 'in' : t.group === 'Exit' ? 'out' : 'loop';

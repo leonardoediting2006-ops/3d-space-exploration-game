@@ -4,7 +4,8 @@ import { ANIM_SLOTS, type AnimSlot, type Layer } from '../core/types';
 import { addEffect } from '../state/actions';
 import { applyLayerTemplate, type Placement } from '../state/templateActions';
 import { appStore } from '../state/store';
-import { LIBRARY, type LibraryItem } from '../templates';
+import { useUserPresets } from '../state/presets';
+import { LIBRARY, userItems, type LibraryItem } from '../templates';
 import { templateSlot } from '../templates/types';
 import { Popover, type Anchor } from './Popover';
 import { TemplateThumb } from './TemplateThumb';
@@ -40,15 +41,18 @@ export function AnimPicker({ layer, slot, anchor, onClose }: { layer: Layer; slo
   const [q, setQ] = useState('');
   const needle = q.trim().toLowerCase();
   const info = ANIM_SLOTS.find((s) => s.id === slot)!;
+  const mine = useUserPresets();
   const groups = useMemo(() => {
     const pick = (list: LibraryItem[]): LayerItem[] =>
       list.filter((i): i is LayerItem => 'template' in i && i.template.accepts(layer) && templateSlot(i.template) === slot && matches(i, needle));
     return [
+      { title: 'My presets', items: pick(userItems()) },
       { title: 'Text animations', items: layer.type === 'text' ? pick(LIBRARY.textAnim) : [] },
       { title: layer.type === 'text' ? 'Whole layer' : 'Motion', items: pick(LIBRARY.motion) },
       { title: 'Looks', items: pick(LIBRARY.effect) },
     ].filter((g) => g.items.length);
-  }, [layer, slot, needle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer, slot, needle, mine]);
 
   return (
     <Popover anchor={anchor} onClose={onClose} width={332} side={anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} className="picker-pop" testId="anim-picker">
@@ -92,7 +96,12 @@ export function EffectPicker({ layer, anchor, onClose }: { layer: Layer; anchor:
     }
     return [...m.entries()];
   }, [needle]);
-  const looks = useMemo(() => LIBRARY.effect.filter((i): i is LayerItem => 'template' in i && i.template.accepts(layer) && matches(i, needle)), [layer, needle]);
+  const mine = useUserPresets();
+  const looks = useMemo(
+    () => [...userItems().filter((i) => i.category === 'effect'), ...LIBRARY.effect].filter((i): i is LayerItem => 'template' in i && i.template.accepts(layer) && matches(i, needle)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layer, needle, mine],
+  );
 
   return (
     <Popover anchor={anchor} onClose={onClose} width={332} side={anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} className="picker-pop" testId="effect-picker">
@@ -101,7 +110,7 @@ export function EffectPicker({ layer, anchor, onClose }: { layer: Layer; anchor:
           Effects <small>{EFFECTS.length}</small>
         </button>
         <button className={tab === 'looks' ? 'on' : ''} onClick={() => setTab('looks')}>
-          Looks <small>{LIBRARY.effect.length}</small>
+          Looks <small>{LIBRARY.effect.length + mine.filter((p) => p.kind === 'effect').length}</small>
         </button>
       </div>
       <input className="search" autoFocus placeholder={tab === 'effects' ? 'Search effects…' : 'Search looks…'} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />

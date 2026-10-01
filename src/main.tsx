@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import './state/presets'; // registers the user's saved presets with the library
 import { App } from './ui/App';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { createDemoProject } from './core/demo';

@@ -34,12 +34,19 @@ export const LIBRARY_ORDER: LibraryCategory[] = ['textStyle', 'textAnim', 'gradi
 
 export const TEMPLATE_COUNT = LIBRARY_ORDER.reduce((n, c) => n + LIBRARY[c].length, 0);
 
+/** The user's own presets, registered by the state layer so they behave like built-in templates. */
+let userLibrary = new Map<string, LibraryItem>();
+export function setUserItems(items: LibraryItem[]): void {
+  userLibrary = new Map(items.map((i) => [i.id, i]));
+}
+export const userItems = (): LibraryItem[] => [...userLibrary.values()];
+
 export function findLibraryItem(id: string): LibraryItem | undefined {
   for (const cat of LIBRARY_ORDER) {
     const hit = LIBRARY[cat].find((i) => i.id === id);
     if (hit) return hit;
   }
-  return undefined;
+  return userLibrary.get(id);
 }
 
 /** Items grouped for display: [group name, items] in first-seen order. */

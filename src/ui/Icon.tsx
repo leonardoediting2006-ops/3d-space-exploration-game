@@ -79,6 +79,7 @@ const PATHS = {
   mask: <><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.6" /><circle cx="8" cy="8" r="3.2" /></>,
   heart: <path d="M8 13.2S2.6 10 2.6 6.2A2.9 2.9 0 018 5a2.9 2.9 0 015.4 1.2C13.4 10 8 13.2 8 13.2z" strokeLinejoin="round" />,
   heartFilled: <path d="M8 13.2S2.6 10 2.6 6.2A2.9 2.9 0 018 5a2.9 2.9 0 015.4 1.2C13.4 10 8 13.2 8 13.2z" fill="currentColor" strokeLinejoin="round" />,
+  edit: <><path d="M3 13l.9-3.2 7-7a1.5 1.5 0 012.1 2.1l-7 7z" /><path d="M9.6 4.4l2 2" /></>,
   dropper: <><path d="M10.6 2.6l2.8 2.8-1.6 1.6-2.8-2.8z" /><path d="M9 4.2L3.4 9.8v2.8h2.8l5.6-5.6" /></>,
 } as const;
 
