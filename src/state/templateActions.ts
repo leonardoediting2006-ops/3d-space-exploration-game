@@ -1,19 +1,20 @@
+import { adoptNew, alignInstanceEnd, makeInstance, pruneInstances, removeInstance, setInstanceStart, snapshot } from '../core/anims';
 import { createSolid, nextCount } from '../core/factory';
 import { setAnimated } from '../core/interp';
 import { createEffect } from '../core/effectDefs';
 import type { Layer } from '../core/types';
 import { findLibraryItem, type LibraryItem } from '../templates';
 import { presetGradient } from '../templates/gradients';
-import type { TemplateCtx } from '../templates/types';
+import { templateSlot, type LayerTemplate, type TemplateCtx } from '../templates/types';
 import { addText, applyEasePreset } from './actions';
 import { activeComp, appStore, commit, timeStore, toast } from './store';
 
 const S = () => appStore.get();
 
-function runTemplate(label: string, edit: (ctx: TemplateCtx) => void): boolean {
+function runTemplate(label: string, edit: (ctx: TemplateCtx) => void, at?: number): boolean {
   const s = S();
   const comp = activeComp(s);
-  const t = timeStore.get().t;
+  const t = at ?? timeStore.get().t;
   try {
     commit((draft) => edit({ project: draft, comp: draft.comps[comp.id], t, fps: comp.fps }));
     return true;
@@ -23,24 +24,62 @@ function runTemplate(label: string, edit: (ctx: TemplateCtx) => void): boolean {
   }
 }
 
+/**
+ * Apply one template to one layer. Animations are remembered as instances on the layer, so they
+ * can be retimed, rescaled and removed later; an In or Out animation replaces the previous one.
+ */
+export function applyTemplateToLayer(layer: Layer, tpl: LayerTemplate, ctx: TemplateCtx): void {
+  const slot = templateSlot(tpl);
+  if (!slot) {
+    tpl.apply(layer, ctx);
+    pruneInstances(layer); // a new look may have replaced an animated one
+    return;
+  }
+  for (const a of [...layer.anims]) {
+    const sameSlot = (slot === 'in' || slot === 'out') && a.kind === tpl.kind && a.slot === slot;
+    if (a.template === tpl.id || sameSlot) removeInstance(layer, a.id);
+  }
+  const before = snapshot(layer);
+  tpl.apply(layer, ctx);
+  const inst = makeInstance(tpl.id, tpl.name, tpl.kind as 'motion' | 'textAnim' | 'effect', slot);
+  if (adoptNew(layer, before, inst.id) > 0) layer.anims.push(inst);
+  pruneInstances(layer);
+}
+
+/** Where a new animation should land: at the playhead, at the layer's start, or ending as the layer ends. */
+export type Placement = 'playhead' | 'start' | 'end';
+
 /** Text styles, text animations, motion and looks: apply to the selected layers that can take them. */
-export function applyLayerTemplate(item: Extract<LibraryItem, { template: unknown }>): void {
+export function applyLayerTemplate(item: Extract<LibraryItem, { template: unknown }>, opts: { place?: Placement; layerIds?: string[] } = {}): void {
   const tpl = item.template;
-  let ids = S().selection.filter((id) => {
+  const place = opts.place ?? 'playhead';
+  const pool = opts.layerIds ?? S().selection;
+  let ids = pool.filter((id) => {
     const l = activeComp().layers.find((x) => x.id === id);
     return l && tpl.accepts(l);
   });
   // text looks with nothing selected: make a text layer to apply them to
   if (!ids.length && (tpl.kind === 'textStyle' || tpl.kind === 'textAnim')) {
-    if (S().selection.length) return void toast('Select a text layer to use this.');
+    if (pool.length) return void toast('Select a text layer to use this.');
     const c = activeComp();
     ids = [addText('Your Text', [c.width / 2, c.height / 2 + 30])];
   }
   if (!ids.length) return void toast(tpl.kind === 'textStyle' || tpl.kind === 'textAnim' ? 'Select a text layer first.' : 'Select a layer first.');
   const idSet = new Set(ids);
-  if (runTemplate(tpl.name, (ctx) => {
-    for (const l of ctx.comp.layers) if (idSet.has(l.id)) tpl.apply(l, ctx);
-  })) toast(`Applied “${tpl.name}”`);
+  const ok = runTemplate(tpl.name, (ctx) => {
+    for (const l of ctx.comp.layers) {
+      if (!idSet.has(l.id)) continue;
+      // a start/end placement needs per-layer times, so shift the context for each layer
+      const t = place === 'start' ? l.inPoint : place === 'end' ? Math.max(l.inPoint, l.outPoint - 1) : ctx.t;
+      applyTemplateToLayer(l, tpl, { ...ctx, t });
+      const inst = l.anims[l.anims.length - 1];
+      if (inst?.template === tpl.id) {
+        if (place === 'start') setInstanceStart(l, inst.id, l.inPoint);
+        if (place === 'end') alignInstanceEnd(l, inst.id, Math.min(l.outPoint, ctx.comp.duration));
+      }
+    }
+  });
+  if (ok) toast(`Applied “${tpl.name}”`);
 }
 
 export function insertScene(item: Extract<LibraryItem, { scene: unknown }>): void {

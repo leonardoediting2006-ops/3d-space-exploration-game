@@ -28,10 +28,14 @@ export const loop = (prop: Prop, mode: 'cycle' | 'pingpong' = 'cycle'): void => 
   prop.loop = mode;
 };
 
-/** Remove effects / animators a previous template added, identified by their `source` prefix. */
-export function dropSource(layer: Layer, prefix: string): void {
-  layer.effects = layer.effects.filter((e) => !e.source?.startsWith(prefix));
-  layer.animators = layer.animators.filter((a) => !a.source?.startsWith(prefix));
+/**
+ * Remove effects / animators a previous template added. A `source` ending in ":" (like `look:`)
+ * matches the whole family; anything else matches one template exactly.
+ */
+export function dropSource(layer: Layer, source: string): void {
+  const hit = (s: string | undefined) => s !== undefined && (source.endsWith(':') ? s.startsWith(source) : s === source);
+  layer.effects = layer.effects.filter((e) => !hit(e.source));
+  layer.animators = layer.animators.filter((a) => !hit(a.source));
 }
 
 /** Add an effect with parameter overrides. Returns it so callers can keyframe its properties. */

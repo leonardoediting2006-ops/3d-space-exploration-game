@@ -1,4 +1,4 @@
-import type { Comp, Layer, Project } from '../core/types';
+import type { AnimSlot, Comp, Layer, Project } from '../core/types';
 
 /** What a template sees when it is applied. `project` is the working draft, so templates can use counters. */
 export interface TemplateCtx {
@@ -50,3 +50,23 @@ export const CATEGORY_LABELS: Record<LibraryCategory, string> = {
   effect: 'Looks',
   scene: 'Scenes',
 };
+
+const ANIMATED_LOOK_SLOT: Record<string, AnimSlot> = {
+  'look.blurFocusIn': 'in',
+  'look.scanDissolve': 'in',
+  'look.blurDefocusOut': 'out',
+  'look.flashWhite': 'emph',
+  'look.pulseGlow': 'loop',
+  'look.hueCycle': 'loop',
+};
+
+/**
+ * Where a template's animation sits in a layer's life, or null for looks and styles that are not
+ * animations. Applying an In or Out animation replaces the layer's previous one of the same kind.
+ */
+export function templateSlot(t: Pick<LayerTemplate, 'id' | 'kind' | 'group'>): AnimSlot | null {
+  if (t.kind === 'effect') return ANIMATED_LOOK_SLOT[t.id] ?? null;
+  if (t.kind === 'motion') return t.group === 'Enter' ? 'in' : t.group === 'Exit' ? 'out' : t.group === 'Emphasis' ? 'emph' : 'loop';
+  if (t.kind === 'textAnim') return t.group === 'Reveal' || t.group === 'Entrance' ? 'in' : t.group === 'Exit' ? 'out' : 'loop';
+  return null;
+}

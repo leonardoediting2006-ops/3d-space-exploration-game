@@ -1,3 +1,15 @@
+import {
+  alignInstanceEnd,
+  instanceSpan,
+  pruneInstances,
+  removeInstance,
+  setInstanceEase,
+  setInstanceLength,
+  setInstanceSpeed,
+  setInstanceStart,
+  setInstanceStrength,
+  shiftInstance,
+} from '../core/anims';
 import { createEffect } from '../core/effectDefs';
 import {
   createAdjustment,
@@ -549,6 +561,7 @@ export function deleteKeys(ids: string[]): void {
           delete prop.loop;
         }
       }
+      pruneInstances(l);
     }
   });
   appStore.set({ selKeys: [] });
@@ -633,7 +646,9 @@ export function removeEffect(layerId: string, effectId: string): void {
   const compId = S().activeCompId;
   commit((p) => {
     const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    if (l) l.effects = l.effects.filter((e) => e.id !== effectId);
+    if (!l) return;
+    l.effects = l.effects.filter((e) => e.id !== effectId);
+    pruneInstances(l);
   });
 }
 
@@ -1213,6 +1228,61 @@ export function removeTextAnimator(layerId: string, animatorId: string): void {
   const compId = S().activeCompId;
   commit((p) => {
     const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    if (l) l.animators = l.animators.filter((a) => a.id !== animatorId);
+    if (!l) return;
+    l.animators = l.animators.filter((a) => a.id !== animatorId);
+    pruneInstances(l);
+  });
+}
+
+/* ------------------------------------------------------------------ library animations */
+
+function editAnim(layerId: string, edit: (layer: Layer, comp: Comp) => void): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const comp = p.comps[compId];
+    const l = comp.layers.find((x) => x.id === layerId);
+    if (l) edit(l, comp);
+  });
+}
+
+/** Move an applied animation so it starts at `start` seconds. */
+export function setAnimStart(layerId: string, instId: string, start: number): void {
+  editAnim(layerId, (l, comp) => setInstanceStart(l, instId, snapToFrame(Math.max(0, start), comp.fps)));
+}
+
+/** Slide an applied animation by `dt` seconds (timeline drags). */
+export function moveAnim(layerId: string, instId: string, dt: number): void {
+  if (Math.abs(dt) < 1e-9) return;
+  editAnim(layerId, (l) => shiftInstance(l, instId, dt));
+}
+
+/** Change how long an applied animation lasts. */
+export function setAnimLength(layerId: string, instId: string, length: number): void {
+  editAnim(layerId, (l, comp) => setInstanceLength(l, instId, Math.max(1 / comp.fps, length)));
+}
+
+export function setAnimSpeed(layerId: string, instId: string, freq: number): void {
+  editAnim(layerId, (l) => setInstanceSpeed(l, instId, Math.max(0.05, freq)));
+}
+
+export function setAnimStrength(layerId: string, instId: string, strength: number): void {
+  editAnim(layerId, (l) => setInstanceStrength(l, instId, strength));
+}
+
+export function setAnimEase(layerId: string, instId: string, ease: Ease): void {
+  editAnim(layerId, (l) => setInstanceEase(l, instId, ease));
+}
+
+export function removeAnim(layerId: string, instId: string): void {
+  editAnim(layerId, (l) => removeInstance(l, instId));
+}
+
+/** Snap an applied animation to the layer's first or last moment. */
+export function alignAnim(layerId: string, instId: string, to: 'start' | 'end'): void {
+  editAnim(layerId, (l, comp) => {
+    if (to === 'start') setInstanceStart(l, instId, l.inPoint);
+    else alignInstanceEnd(l, instId, Math.min(l.outPoint, comp.duration));
+    const span = instanceSpan(l, instId);
+    if (span) shiftInstance(l, instId, snapToFrame(span.start, comp.fps) - span.start);
   });
 }

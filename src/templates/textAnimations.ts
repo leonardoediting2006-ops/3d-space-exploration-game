@@ -19,7 +19,7 @@ function anim(id: string, name: string, group: string, timing: Timing, build: (l
     previewTime: timing.still,
     previewDuration: timing.length,
     apply(layer, c) {
-      dropSource(layer, 'anim:');
+      dropSource(layer, `anim:${id}`);
       build(layer, c, `anim:${id}`);
     },
   };

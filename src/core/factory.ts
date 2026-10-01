@@ -103,6 +103,7 @@ function baseLayer(type: LayerType, data: LayerData, o: BaseOpts, content: Recor
     effects: [],
     masks: [],
     animators: [],
+    anims: [],
     data,
   };
 }

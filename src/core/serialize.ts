@@ -67,13 +67,14 @@ function checkProp(p: unknown, what: string): Prop {
     const e = k.ease;
     const ok = e === 'linear' || e === 'hold' || (typeof e === 'string' && (NAMED_EASES as readonly string[]).includes(e)) || (Array.isArray(e) && e.length === 4 && e.every(isNum));
     if (!ok) fail(`${what} keyframe ease`);
+    if (k.src !== undefined && typeof k.src !== 'string') fail(`${what} keyframe source`);
     for (const t of [k.sIn, k.sOut]) {
       if (t !== undefined && !(Array.isArray(t) && t.length === 2 && t.every(isNum))) fail(`${what} keyframe motion-path tangent`);
     }
   }
   if (p.wiggle !== undefined) {
     const w = p.wiggle;
-    if (!isObj(w) || !isNum(w.freq) || !isNum(w.amp) || !isNum(w.seed)) fail(`${what}.wiggle`);
+    if (!isObj(w) || !isNum(w.freq) || !isNum(w.amp) || !isNum(w.seed) || (w.src !== undefined && typeof w.src !== 'string')) fail(`${what}.wiggle`);
   }
   if (p.loop !== undefined && p.loop !== 'cycle' && p.loop !== 'pingpong') fail(`${what}.loop`);
   return p as unknown as Prop;
@@ -98,6 +99,7 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
   for (const fx of l.effects as unknown[]) {
     if (!isObj(fx) || typeof fx.id !== 'string' || typeof fx.enabled !== 'boolean') return fail(`${what} has a bad effect`);
     if (!getEffectDef(str(fx.type, 'effect type'))) fail(`${what} uses an unknown effect "${fx.type}"`);
+    if (fx.inst !== undefined && typeof fx.inst !== 'string') fail(`${what} effect source`);
     if (!isObj(fx.props)) fail(`${what} effect props`);
     for (const [k, p] of Object.entries(fx.props as Record<string, unknown>)) checkProp(p, `${what} effect ${k}`);
   }
@@ -114,7 +116,17 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
     if (!Array.isArray(l.animators) || l.animators.length > 50) fail(`${what}.animators`);
     for (const a of l.animators as unknown[]) {
       if (!isObj(a) || typeof a.id !== 'string' || typeof a.name !== 'string' || !isObj(a.props)) return fail(`${what} has a bad text animator`);
+      if (a.inst !== undefined && typeof a.inst !== 'string') fail(`${what} animator source`);
       for (const k of ANIMATOR_KEYS) checkProp((a.props as Record<string, unknown>)[k], `${what} animator ${k}`);
+    }
+  }
+  if (l.anims !== undefined) {
+    if (!Array.isArray(l.anims) || l.anims.length > 200) fail(`${what}.anims`);
+    for (const a of l.anims as unknown[]) {
+      if (!isObj(a) || typeof a.id !== 'string' || typeof a.template !== 'string' || typeof a.name !== 'string') return fail(`${what} has a bad animation`);
+      if (!['in', 'out', 'loop', 'emph'].includes(String(a.slot))) fail(`${what} animation slot`);
+      if (!['motion', 'textAnim', 'effect'].includes(String(a.kind))) fail(`${what} animation kind`);
+      numIn(a.strength, `${what} animation strength`, 0.01, 10);
     }
   }
   if (!isObj(l.data)) return fail(`${what}.data`);
@@ -214,6 +226,7 @@ function repairProject(project: Project): void {
       for (const k of TRANSFORM_KEYS) l.transform[k] = { ...fresh[k], ...l.transform[k] };
       l.masks ??= [];
       l.animators ??= [];
+      l.anims ??= [];
       if (l.data.type === 'shape') l.data.closed ??= true;
     }
   }

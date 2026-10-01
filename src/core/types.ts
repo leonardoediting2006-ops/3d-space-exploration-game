@@ -36,12 +36,16 @@ export interface Keyframe {
    */
   sIn?: [number, number];
   sOut?: [number, number];
+  /** The library animation (an `AnimInstance` id on the layer) that created this keyframe. */
+  src?: string;
 }
 
 export interface Wiggle {
   freq: number; // wiggles per second
   amp: number; // peak deviation, in the property's own units
   seed: number;
+  /** The library animation (an `AnimInstance` id on the layer) that added this wiggle. */
+  src?: string;
 }
 
 export interface Prop {
@@ -153,6 +157,8 @@ export interface Effect {
   props: Record<string, Prop>;
   /** The template that created this effect, so applying a new look can replace the old one. */
   source?: string;
+  /** The library animation (an `AnimInstance` id on the layer) this effect belongs to. */
+  inst?: string;
 }
 
 /**
@@ -163,7 +169,33 @@ export interface TextAnimator {
   id: string;
   name: string;
   source?: string;
+  /** The library animation (an `AnimInstance` id on the layer) this animator belongs to. */
+  inst?: string;
   props: Record<string, Prop>;
+}
+
+/** Where an applied library animation sits in a layer's life. */
+export type AnimSlot = 'in' | 'out' | 'loop' | 'emph';
+export const ANIM_SLOTS: { id: AnimSlot; label: string; hint: string }[] = [
+  { id: 'in', label: 'In', hint: 'How the layer arrives' },
+  { id: 'out', label: 'Out', hint: 'How the layer leaves' },
+  { id: 'loop', label: 'Loop', hint: 'Keeps going while the layer is on screen' },
+  { id: 'emph', label: 'Emphasis', hint: 'A one-off accent' },
+];
+
+/**
+ * A library animation applied to a layer. Everything it made (keyframes, effects, text animators)
+ * is tagged with `id`, so it can be retimed, rescaled, re-eased or removed as one unit.
+ */
+export interface AnimInstance {
+  id: string;
+  /** Library id of the template, for example `motion.slideInLeft`. */
+  template: string;
+  name: string;
+  kind: 'motion' | 'textAnim' | 'effect';
+  slot: AnimSlot;
+  /** 1 = as designed. Scales how far the animation strays from the layer's resting values. */
+  strength: number;
 }
 
 export type MaskMode = 'none' | 'add' | 'subtract' | 'intersect';
@@ -206,6 +238,8 @@ export interface Layer {
   masks: Mask[];
   /** Only used by text layers. */
   animators: TextAnimator[];
+  /** Library animations applied to this layer (their keyframes carry the instance id). */
+  anims: AnimInstance[];
   data: LayerData;
 }
 
