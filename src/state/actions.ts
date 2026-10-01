@@ -3,13 +3,16 @@ import {
   instanceSpan,
   pruneInstances,
   removeInstance,
+  setInstanceAnimatorSetting,
   setInstanceEase,
   setInstanceLength,
+  setInstanceSpan,
   setInstanceSpeed,
   setInstanceStart,
   setInstanceStrength,
   shiftInstance,
 } from '../core/anims';
+import { defaultPropValue } from '../core/defaults';
 import { createEffect } from '../core/effectDefs';
 import {
   createAdjustment,
@@ -30,7 +33,7 @@ import {
 import { uid } from '../core/ids';
 import type { AnimatorKind } from '../core/factory';
 import { baseValue, evalProp, NAMED_EASE_REVERSE, setAnimated, setKeyAt, sortKeys } from '../core/interp';
-import { clamp } from '../core/math';
+import { applyVec, clamp, invert } from '../core/math';
 import { insertVertex, removeVertex } from '../core/path';
 import { cloneLayer, findKey, layerProps, layerPropEntries, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
@@ -54,7 +57,7 @@ import type {
   Wiggle,
 } from '../core/types';
 import { allAssetData, clearAssets, imageSize, readFileAsDataUrl, setAssetData } from '../render/assets';
-import { localBounds } from '../render/geometry';
+import { layerMap, layerPolygon, localBounds, parentWorld } from '../render/geometry';
 import { downloadBlob } from '../render/export';
 import { appStore, activeComp, commit, resetHistory, timeStore, toast } from './store';
 
@@ -639,7 +642,7 @@ export function addEffect(layerIds: string[], type: string): void {
       if (fx) l.effects.push(fx);
     }
   });
-  if (layerIds.length) appStore.set({ rightTab: 'controls' });
+  if (layerIds.length) appStore.set({ rightTab: 'inspector' });
 }
 
 export function removeEffect(layerId: string, effectId: string): void {
@@ -1273,6 +1276,15 @@ export function setAnimEase(layerId: string, instId: string, ease: Ease): void {
   editAnim(layerId, (l) => setInstanceEase(l, instId, ease));
 }
 
+export function setAnimTextSetting(layerId: string, instId: string, key: 'units' | 'random' | 'seed' | 'smooth', value: number): void {
+  editAnim(layerId, (l) => setInstanceAnimatorSetting(l, instId, key, value));
+}
+
+/** Drag a clip's edge on the timeline: set both ends of an animation at once. */
+export function resizeAnim(layerId: string, instId: string, start: number, end: number): void {
+  editAnim(layerId, (l, comp) => setInstanceSpan(l, instId, Math.max(0, snapToFrame(start, comp.fps)), Math.max(snapToFrame(end, comp.fps), snapToFrame(start, comp.fps) + 1 / comp.fps)));
+}
+
 export function removeAnim(layerId: string, instId: string): void {
   editAnim(layerId, (l) => removeInstance(l, instId));
 }
@@ -1284,5 +1296,122 @@ export function alignAnim(layerId: string, instId: string, to: 'start' | 'end'):
     else alignInstanceEnd(l, instId, Math.min(l.outPoint, comp.duration));
     const span = instanceSpan(l, instId);
     if (span) shiftInstance(l, instId, snapToFrame(span.start, comp.fps) - span.start);
+  });
+}
+
+/* ------------------------------------------------------------------ keyframe values, reset, align */
+
+/** Set the value of one keyframe (the keyframe list in the Inspector). */
+export function setKeyValue(keyId: string, value: PropValue): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const f = findKey(p.comps[compId].layers, keyId);
+    if (f) f.prop.keys[f.index].v = Array.isArray(value) ? [...value] : value;
+  });
+}
+
+/** Move one keyframe to a new time, keeping the keys ordered. */
+export function setKeyTime(keyId: string, t: number): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const comp = p.comps[compId];
+    const f = findKey(comp.layers, keyId);
+    if (!f) return;
+    f.prop.keys[f.index].t = clamp(snapToFrame(t, comp.fps), 0, comp.duration);
+    sortKeys(f.prop);
+  });
+}
+
+/** Put a property back to its neutral / default value (at the playhead if it is animated). */
+export function resetProp(layerId: string, group: PropGroup, key: string): void {
+  const comp = activeComp();
+  const layer = comp.layers.find((l) => l.id === layerId);
+  const v = layer && defaultPropValue(layer, comp, group, key);
+  if (v !== undefined) setPropValue(layerId, group, key, v);
+}
+
+/** Reset the transform (position, scale, rotation, opacity) of layers. */
+export function resetTransform(ids: string[]): void {
+  for (const id of ids) for (const key of ['position', 'scale', 'rotation', 'opacity']) resetProp(id, 'transform', key);
+}
+
+export type AlignMode = 'left' | 'centerH' | 'right' | 'top' | 'middle' | 'bottom';
+
+interface Box {
+  l: number;
+  r: number;
+  t: number;
+  b: number;
+}
+
+function layerBoxes(comp: Comp, project: Project, ids: string[], t: number): Map<string, Box> {
+  const out = new Map<string, Box>();
+  for (const l of comp.layers) {
+    if (!ids.includes(l.id)) continue;
+    const poly = layerPolygon(project, comp, l, t);
+    if (!poly?.length) continue;
+    const xs = poly.map((p) => p[0]);
+    const ys = poly.map((p) => p[1]);
+    out.set(l.id, { l: Math.min(...xs), r: Math.max(...xs), t: Math.min(...ys), b: Math.max(...ys) });
+  }
+  return out;
+}
+
+/** Move layers by a vector in composition space, however deeply they are parented. */
+function shiftInComp(comp: Comp, l: Layer, t: number, dx: number, dy: number): void {
+  const byId = layerMap(comp);
+  const inv = invert(parentWorld(l, t, byId));
+  const d: Vec2 = inv ? applyVec(inv, [dx, dy]) : [dx, dy];
+  const pos = evalProp(l.transform.position, t) as number[];
+  const next: Vec2 = [pos[0] + d[0], pos[1] + d[1]];
+  if (l.transform.position.keys.length) setKeyAt(l.transform.position, t, next, keyTol(comp));
+  else l.transform.position.value = next;
+}
+
+/** Align layers to each other (several selected) or to the composition (one selected). */
+export function alignLayers(ids: string[], mode: AlignMode): void {
+  const compId = S().activeCompId;
+  const t = now();
+  commit((p) => {
+    const comp = p.comps[compId];
+    const boxes = layerBoxes(comp, p, ids, t);
+    if (!boxes.size) return;
+    const list = [...boxes.values()];
+    const ref: Box =
+      boxes.size > 1
+        ? { l: Math.min(...list.map((b) => b.l)), r: Math.max(...list.map((b) => b.r)), t: Math.min(...list.map((b) => b.t)), b: Math.max(...list.map((b) => b.b)) }
+        : { l: 0, r: comp.width, t: 0, b: comp.height };
+    for (const l of comp.layers) {
+      const b = boxes.get(l.id);
+      if (!b) continue;
+      const dx = mode === 'left' ? ref.l - b.l : mode === 'right' ? ref.r - b.r : mode === 'centerH' ? (ref.l + ref.r) / 2 - (b.l + b.r) / 2 : 0;
+      const dy = mode === 'top' ? ref.t - b.t : mode === 'bottom' ? ref.b - b.b : mode === 'middle' ? (ref.t + ref.b) / 2 - (b.t + b.b) / 2 : 0;
+      if (dx || dy) shiftInComp(comp, l, t, dx, dy);
+    }
+  });
+}
+
+/** Space three or more layers evenly between the outermost two. */
+export function distributeLayers(ids: string[], axis: 'h' | 'v'): void {
+  const compId = S().activeCompId;
+  const t = now();
+  commit((p) => {
+    const comp = p.comps[compId];
+    const boxes = layerBoxes(comp, p, ids, t);
+    if (boxes.size < 3) return;
+    const lo = axis === 'h' ? (b: Box) => b.l : (b: Box) => b.t;
+    const hi = axis === 'h' ? (b: Box) => b.r : (b: Box) => b.b;
+    const sorted = [...boxes.entries()].sort((a, b) => lo(a[1]) + hi(a[1]) - (lo(b[1]) + hi(b[1])));
+    const first = sorted[0][1];
+    const last = sorted[sorted.length - 1][1];
+    const sizes = sorted.reduce((n, [, b]) => n + (hi(b) - lo(b)), 0);
+    const gap = (hi(last) - lo(first) - sizes) / (sorted.length - 1);
+    let cursor = hi(first) + gap;
+    for (const [id, b] of sorted.slice(1, -1)) {
+      const l = comp.layers.find((x) => x.id === id)!;
+      const d = cursor - lo(b);
+      if (Math.abs(d) > 1e-6) shiftInComp(comp, l, t, axis === 'h' ? d : 0, axis === 'v' ? d : 0);
+      cursor += hi(b) - lo(b) + gap;
+    }
   });
 }

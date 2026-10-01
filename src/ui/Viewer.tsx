@@ -14,10 +14,12 @@ import {
   type Rect,
 } from '../render/geometry';
 import {
+  addFootageLayer,
   addMask,
   addPathShape,
   addShape,
   addText,
+  importFiles,
   insertPathVertex,
   deleteLayers,
   selectKeys,
@@ -30,6 +32,7 @@ import {
   type PropUpdate,
 } from '../state/actions';
 import { activeComp, appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp } from '../state/store';
+import { Icon } from './Icon';
 import { editTarget, type PathTarget } from './pathEdit';
 import { ViewerBar } from './ViewerBar';
 
@@ -1045,6 +1048,7 @@ export function Viewer() {
             onPointerDown={(e) => e.stopPropagation()}
           />
         )}
+        {comp.layers.length === 0 && !editing && <EmptyState />}
         <div className="viewport-hud">
           {Math.round(zoom * 100)}% · {comp.width}×{comp.height}
         </div>
@@ -1072,3 +1076,46 @@ const normalize = (v: Vec2): Vec2 => {
   return [v[0] / l, v[1] / l];
 };
 
+
+
+/** Shown over an empty composition: the quickest ways to start. */
+function EmptyState() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const comp = activeComp();
+  const c: Vec2 = [comp.width / 2, comp.height / 2];
+  return (
+    <div className="viewer-empty" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} data-testid="viewer-empty">
+      <div className="empty-card">
+        <h2>Start something</h2>
+        <p>Add a layer, then give it motion from the Library. Everything stays editable.</p>
+        <div className="empty-actions">
+          <button onClick={() => addText('Your title', c)} data-testid="empty-text">
+            <Icon name="text" size={16} /> Text
+          </button>
+          <button onClick={() => addShape('rect', [420, 300], c)}>
+            <Icon name="shape" size={16} /> Shape
+          </button>
+          <button onClick={() => fileRef.current?.click()}>
+            <Icon name="image" size={16} /> Image
+          </button>
+          <button onClick={() => appStore.set({ rightTab: 'library' })}>
+            <Icon name="sparkle" size={16} /> Library
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={async (e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = '';
+            const ids = await importFiles(files);
+            for (const id of ids.reverse()) addFootageLayer(id);
+          }}
+        />
+      </div>
+    </div>
+  );
+}

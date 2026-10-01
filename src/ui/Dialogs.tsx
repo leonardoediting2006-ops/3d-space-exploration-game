@@ -3,6 +3,7 @@ import type { RGB } from '../core/types';
 import { exportPng, exportPngSequence, exportVideo, downloadBlob, videoSupport, type VideoFormat } from '../render/export';
 import { addSolid, closeDialog, newComp, updateComp } from '../state/actions';
 import { appStore, timeStore, useActiveComp, useApp } from '../state/store';
+import { CommandPalette } from './CommandPalette';
 import { hexToRgb, rgbToHex } from './fields';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
@@ -58,6 +59,8 @@ export function Dialogs() {
       return <ShortcutsDialog />;
     case 'about':
       return <AboutDialog />;
+    case 'palette':
+      return <CommandPalette />;
   }
 }
 
@@ -317,6 +320,8 @@ function ExportDialog() {
 }
 
 const SHORTCUTS: [string, string][] = [
+  ['Ctrl+K', 'Command palette: search every command, effect, layer and template'],
+  ['Ctrl+Shift+K', 'Composition settings'],
   ['Space', 'Play / pause'],
   ['Home / End', 'Go to start / end'],
   ['Page Up / Page Down', 'Previous / next frame (Shift = 10 frames)'],
@@ -393,7 +398,19 @@ export function Toast() {
   if (!toast) return null;
   return (
     <div className="toast" role="status" onClick={() => appStore.set({ toast: null })} data-testid="toast">
-      {toast.text}
+      <span>{toast.text}</span>
+      {toast.action && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            appStore.set({ toast: null });
+            toast.action!.run();
+          }}
+          data-testid="toast-action"
+        >
+          {toast.action.label}
+        </button>
+      )}
     </div>
   );
 }

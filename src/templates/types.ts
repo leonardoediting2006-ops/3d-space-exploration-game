@@ -70,3 +70,6 @@ export function templateSlot(t: Pick<LayerTemplate, 'id' | 'kind' | 'group'>): A
   if (t.kind === 'textAnim') return t.group === 'Reveal' || t.group === 'Entrance' ? 'in' : t.group === 'Exit' ? 'out' : 'loop';
   return null;
 }
+
+/** The `source` tag a template stamps on the effects and text animators it adds (`look.softGlow` → `look:softGlow`). */
+export const templateSource = (id: string): string => id.replace(/^textanim\./, 'anim:').replace('.', ':');

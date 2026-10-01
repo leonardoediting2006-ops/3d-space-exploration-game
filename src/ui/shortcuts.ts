@@ -44,6 +44,14 @@ function isTyping(el: EventTarget | null): boolean {
 
 export function installShortcuts(): () => void {
   const down = (e: KeyboardEvent) => {
+    // the command palette is reachable from anywhere, even while typing in a field
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      const open = appStore.get().dialog;
+      if (!open) openDialog({ kind: 'palette' });
+      else if (open.kind === 'palette') appStore.set({ dialog: null });
+      return;
+    }
     if (isTyping(e.target)) return;
     const s = appStore.get();
     if (s.dialog) return;

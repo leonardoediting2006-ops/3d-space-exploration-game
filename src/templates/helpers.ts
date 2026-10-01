@@ -21,7 +21,11 @@ export function setVal(prop: Prop, v: PropValue): void {
 /** Keyframe `prop` through [seconds-from-t0, value, ease-leaving-this-key] stops. */
 export function tween(prop: Prop, c: TemplateCtx, t0: number, stops: [number, PropValue, Ease?][]): void {
   const tol = 0.25 / c.fps;
-  for (const [dt, v, ease] of stops) setKeyAt(prop, t0 + dt, copy(v), tol, ease ?? 'linear');
+  for (const [dt, v, ease] of stops) {
+    // a template that starts on an existing keyframe takes it over, easing included
+    const k = setKeyAt(prop, t0 + dt, copy(v), tol, ease ?? 'linear');
+    k.ease = ease === undefined || typeof ease === 'string' ? (ease ?? 'linear') : [...ease];
+  }
 }
 
 export const loop = (prop: Prop, mode: 'cycle' | 'pingpong' = 'cycle'): void => {

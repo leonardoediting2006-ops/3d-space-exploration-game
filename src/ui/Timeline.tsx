@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
+import { instanceSpan } from '../core/anims';
 import { getEffectDef } from '../core/effectDefs';
 import { snapToFrame, timecode, parseTimecode } from '../core/time';
 import {
@@ -8,6 +9,8 @@ import {
   MATTE_MODES,
   TRANSFORM_KEYS,
   type BlendMode,
+  ANIM_SLOTS,
+  type AnimInstance,
   type Comp,
   type Keyframe,
   type Layer,
@@ -20,10 +23,13 @@ import {
   applyKeyEase,
   clearMotionPathCurves,
   deleteKeys,
+  moveAnim,
   moveKeys,
   moveLayerToIndex,
   moveLayersInTime,
+  removeAnim,
   removeEffect,
+  resizeAnim,
   removeMask,
   removeTextAnimator,
   selectKeys,
@@ -48,16 +54,18 @@ import {
 import { appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp, useTime } from '../state/store';
 import { EaseEditor } from './EaseEditor';
 import { useTimeIf } from './fields';
+import { Icon, LAYER_ICON } from './Icon';
 import { PropEditor } from './PropEditor';
 
-const LEFT_W = 600;
+const COLUMNS_W = 300;
 const RULER_H = 30;
-const ROW_LAYER = 28;
+const ROW_LAYER = 30;
 const ROW_PROP = 24;
 
 type Row =
   | { kind: 'layer'; id: string; layer: Layer; index: number }
   | { kind: 'group'; id: string; layer: Layer; label: string; depth: number; open: boolean; fxId?: string; maskId?: string; animId?: string }
+  | { kind: 'anim'; id: string; layer: Layer; inst: AnimInstance }
   | { kind: 'prop'; id: string; layer: Layer; group: PropGroup; propKey: string; prop: Prop; depth: number };
 
 const rowHeight = (r: Row) => (r.kind === 'layer' ? ROW_LAYER : ROW_PROP);
@@ -87,6 +95,14 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
     const tOpen = expanded[tId] ?? true;
     rows.push({ kind: 'group', id: tId, layer, label: 'Transform', depth: 1, open: tOpen });
     if (tOpen) for (const k of TRANSFORM_KEYS) rows.push({ kind: 'prop', id: `${layer.id}:transform.${k}`, layer, group: 'transform', propKey: k, prop: layer.transform[k], depth: 2 });
+
+    const live = layer.anims;
+    if (live.length) {
+      const aId = `${layer.id}:anims`;
+      const aOpen = expanded[aId] ?? true;
+      rows.push({ kind: 'group', id: aId, layer, label: 'Animations', depth: 1, open: aOpen });
+      if (aOpen) for (const inst of live) rows.push({ kind: 'anim', id: `${layer.id}:inst.${inst.id}`, layer, inst });
+    }
 
     const contentKeys = Object.keys(layer.content);
     if (contentKeys.length) {
@@ -195,6 +211,9 @@ export function Timeline() {
   const selKeys = useApp((s) => s.selKeys);
   const playing = useApp((s) => s.playing);
   const snapOn = useApp((s) => s.snap);
+  const showColumns = useApp((s) => s.showColumns);
+  const tlLeft = useApp((s) => s.tlLeft);
+  const leftW = tlLeft + (showColumns ? COLUMNS_W : 0);
   const rows = useMemo(() => buildRows(comp, expanded, showOnly), [comp, expanded, showOnly]);
   const selKeySet = useMemo(() => new Set(selKeys), [selKeys]);
   const selSet = useMemo(() => new Set(selection), [selection]);
@@ -349,6 +368,19 @@ export function Timeline() {
     onScroll();
   };
 
+  const resizeLeft = (e: RPointerEvent) => {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const w0 = appStore.get().tlLeft;
+    const move = (ev: PointerEvent) => appStore.set({ tlLeft: Math.min(560, Math.max(190, w0 + ev.clientX - x0)) });
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   const gridStyle: CSSProperties = { backgroundSize: `${pps}px 100%` };
 
   return (
@@ -357,18 +389,23 @@ export function Timeline() {
         <TimeDisplay comp={comp} />
         <span className="tl-sep" />
         <button
-          className={comp.motionBlur ? 'on' : ''}
+          className={`tl-toggle ${comp.motionBlur ? 'on' : ''}`}
           title="Enable motion blur for layers that have it switched on"
           onClick={() => updateComp(comp.id, { motionBlur: !comp.motionBlur })}
           data-testid="comp-motion-blur"
         >
-          ◐ Motion Blur
+          <Icon name="motionBlur" size={14} /> Motion blur
         </button>
-        <button className={snapOn ? 'on' : ''} title="Snap layer edges and keyframes to the playhead and other layers (hold Alt to bypass)" onClick={() => appStore.set({ snap: !snapOn })} data-testid="snap-toggle">
-          ⌖ Snap
+        <button className={`tl-toggle ${snapOn ? 'on' : ''}`} title="Snap layer edges and keyframes to the playhead and other layers (hold Alt to bypass)" onClick={() => appStore.set({ snap: !snapOn })} data-testid="snap-toggle">
+          <Icon name="anchor" size={14} /> Snap
+        </button>
+        <button className={`tl-toggle ${showColumns ? 'on' : ''}`} title="Show blend mode, track matte and parent columns" onClick={() => appStore.set({ showColumns: !showColumns })} data-testid="columns-toggle">
+          <Icon name="layers" size={14} /> Columns
         </button>
         <span className="tl-spacer" />
-        <button title="Fit timeline to window" onClick={fitWidth}>⇔</button>
+        <button className="icon-btn" title="Fit the timeline to the window" onClick={fitWidth}>
+          <Icon name="fit" size={14} />
+        </button>
         <input
           className="tl-zoom"
           type="range"
@@ -381,15 +418,17 @@ export function Timeline() {
         />
       </div>
 
-      <div className="tl-main" style={{ gridTemplateColumns: `${LEFT_W}px 1fr`, gridTemplateRows: `${RULER_H}px 1fr` }}>
+      <div className="tl-main" style={{ gridTemplateColumns: `${leftW}px 1fr`, gridTemplateRows: `${RULER_H}px 1fr` }}>
         <div className="tl-corner">
-          <span style={{ width: 80 }} />
-          <span style={{ width: 26 }}>#</span>
-          <span style={{ flex: 1 }}>Layer Name</span>
-          <span style={{ width: 28 }} title="Motion blur">◐</span>
-          <span style={{ width: 98 }}>Mode</span>
-          <span style={{ width: 98 }}>Track Matte</span>
-          <span style={{ width: 96 }}>Parent</span>
+          <span className="corner-name">Layers</span>
+          {showColumns && (
+            <>
+              <span style={{ width: 98 }}>Blend</span>
+              <span style={{ width: 98 }}>Matte</span>
+              <span style={{ width: 96 }}>Parent</span>
+            </>
+          )}
+          <i className="tl-resize" title="Drag to resize the layer column" onPointerDown={resizeLeft} />
         </div>
 
         <div className="tl-ruler-clip">
@@ -401,6 +440,7 @@ export function Timeline() {
         </div>
 
         <div className="tl-left-clip" onWheel={(e) => bodyRef.current && (bodyRef.current.scrollTop += e.deltaY)}>
+          <i className="tl-resize" title="Drag to resize the layer column" onPointerDown={resizeLeft} />
           <div ref={leftInner} className="tl-left" style={{ height: totalH }}>
             {rows.map((r) => (
               <div key={r.id} className={`tl-lrow ${r.kind}`} style={{ height: rowHeight(r) }}>
@@ -412,15 +452,17 @@ export function Timeline() {
                     selected={selSet.has(r.layer.id)}
                     open={!!expanded[r.layer.id] || !!showOnly[r.layer.id]}
                     dropAbove={dropIndex === r.index}
+                    columns={showColumns}
                     onSelect={(e) => selectLayer(r.layer, e)}
                     onReorder={(e) => reorder(e, r.layer, r.index)}
                   />
                 )}
                 {r.kind === 'group' && <GroupLeft row={r} />}
+                {r.kind === 'anim' && <AnimLeft row={r} />}
                 {r.kind === 'prop' && <PropLeft row={r} onMenu={(e) => propMenu(e, r)} />}
               </div>
             ))}
-            {rows.length === 0 && <div className="tl-empty">No layers yet. Use the Layer menu or the tools to add some.</div>}
+            {rows.length === 0 && <div className="tl-empty">No layers yet. Press <b>Add</b> above the viewer, or drop an image here.</div>}
           </div>
         </div>
 
@@ -442,6 +484,7 @@ export function Timeline() {
                 return (
                   <div key={r.id} className={`tl-rrow ${r.kind} ${r.kind === 'layer' && selSet.has(r.layer.id) ? 'sel' : ''}`} style={{ top, height: rowHeight(r) }}>
                     {r.kind === 'layer' && <LayerBar layer={r.layer} comp={comp} pps={pps} selected={selSet.has(r.layer.id)} onSelect={(e) => selectLayer(r.layer, e)} />}
+                    {r.kind === 'anim' && <AnimClip layer={r.layer} inst={r.inst} comp={comp} pps={pps} />}
                     {r.kind === 'prop' &&
                       r.prop.keys.map((k) => (
                         <KeyframeDot key={k.id} k={k} pps={pps} fps={comp.fps} selected={selKeySet.has(k.id)} onContext={keyMenu} onEdit={(ev) => setEasing({ keyId: k.id, x: ev.clientX, y: ev.clientY })} />
@@ -590,11 +633,12 @@ interface LayerLeftProps {
   selected: boolean;
   open: boolean;
   dropAbove: boolean;
+  columns: boolean;
   onSelect: (e: React.MouseEvent) => void;
   onReorder: (e: RPointerEvent) => void;
 }
 
-function LayerLeft({ layer, index, comp, selected, open, dropAbove, onSelect, onReorder }: LayerLeftProps) {
+function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onSelect, onReorder }: LayerLeftProps) {
   const [renaming, setRenaming] = useState(false);
   const color = LABEL_COLORS[layer.label % LABEL_COLORS.length];
   const toggleOpen = () => {
@@ -607,23 +651,14 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, onSelect, on
   };
   const parents = comp.layers.filter((l) => l.id !== layer.id);
   return (
-    <div className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''}`} data-layer-index={index} onPointerDown={onSelect} data-testid={`layer-row-${index}`}>
-      <button className={`sw eye ${layer.visible ? 'on' : ''}`} title="Video" onClick={() => setLayerField(layer.id, { visible: !layer.visible })}>
-        {layer.visible ? '◉' : '○'}
+    <div className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''} ${layer.visible ? '' : 'is-hidden'}`} data-layer-index={index} onPointerDown={onSelect} data-testid={`layer-row-${index}`}>
+      <button className={`twirl ${open ? 'open' : ''}`} onClick={toggleOpen} title="Show properties (P S R T A U)" data-testid={`twirl-${index}`}>
+        <Icon name="chevronRight" size={12} />
       </button>
-      <button className={`sw solo ${layer.solo ? 'on' : ''}`} title="Solo" onClick={() => setLayerField(layer.id, { solo: !layer.solo })}>
-        ●
-      </button>
-      <button className={`sw lock ${layer.locked ? 'on' : ''}`} title="Lock" onClick={() => setLayerField(layer.id, { locked: !layer.locked })}>
-        {layer.locked ? '🔒' : '🔓'}
-      </button>
-      <button className="label-chip" style={{ background: color }} title="Label color" onClick={() => setLayerField(layer.id, { label: (layer.label + 1) % LABEL_COLORS.length })} />
       <span className="idx" title="Drag to reorder" onPointerDown={onReorder}>
         {index + 1}
       </span>
-      <button className={`twirl ${open ? 'open' : ''}`} onClick={toggleOpen} title="Show properties (P S R T A U)" data-testid={`twirl-${index}`}>
-        ▸
-      </button>
+      <button className="label-chip" style={{ background: color }} title="Label colour (click to change)" onClick={() => setLayerField(layer.id, { label: (layer.label + 1) % LABEL_COLORS.length })} />
       {renaming ? (
         <input
           className="rename"
@@ -641,41 +676,54 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, onSelect, on
         />
       ) : (
         <span className="lname" onDoubleClick={() => setRenaming(true)} title={`${layer.name} (${layer.type}) — double-click to rename`}>
-          <em className={`ltype ${layer.type}`}>{typeGlyph(layer.type)}</em>
+          <em className={`ltype ${layer.type}`}>
+            <Icon name={LAYER_ICON[layer.type]} size={12} />
+          </em>
           {layer.name}
         </span>
       )}
-      <button className={`sw mb ${layer.motionBlur ? 'on' : ''}`} title="Motion blur" onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} data-testid={`mb-${index}`}>
-        ◐
-      </button>
-      <select className="mini-select" value={layer.blend} onChange={(e) => setLayerField(layer.id, { blend: e.target.value as BlendMode })}>
-        {BLEND_MODES.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.label}
-          </option>
-        ))}
-      </select>
-      <select className="mini-select" disabled={index === 0} value={layer.matte} title="Uses the layer above as the matte" onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
-        {MATTE_MODES.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-          </option>
-        ))}
-      </select>
-      <select className="mini-select" value={layer.parentId ?? ''} onChange={(e) => setParent(layer.id, e.target.value || null)}>
-        <option value="">None</option>
-        {parents.map((p) => (
-          <option key={p.id} value={p.id}>
-            {comp.layers.indexOf(p) + 1}. {p.name}
-          </option>
-        ))}
-      </select>
+      <span className="switches">
+        <button className={`sw mb ${layer.motionBlur ? 'on' : ''}`} title="Motion blur" onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} data-testid={`mb-${index}`}>
+          <Icon name="motionBlur" size={13} />
+        </button>
+        <button className={`sw solo ${layer.solo ? 'on' : ''}`} title="Solo" onClick={() => setLayerField(layer.id, { solo: !layer.solo })}>
+          <Icon name="solo" size={12} />
+        </button>
+        <button className={`sw lock ${layer.locked ? 'on' : ''}`} title="Lock" onClick={() => setLayerField(layer.id, { locked: !layer.locked })}>
+          <Icon name={layer.locked ? 'lock' : 'unlock'} size={13} />
+        </button>
+        <button className={`sw eye ${layer.visible ? 'on' : 'off'}`} title={layer.visible ? 'Hide' : 'Show'} onClick={() => setLayerField(layer.id, { visible: !layer.visible })}>
+          <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
+        </button>
+      </span>
+      {columns && (
+        <>
+          <select className="mini-select" value={layer.blend} onChange={(e) => setLayerField(layer.id, { blend: e.target.value as BlendMode })}>
+            {BLEND_MODES.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+          <select className="mini-select" disabled={index === 0} value={layer.matte} title="Uses the layer above as the matte" onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
+            {MATTE_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <select className="mini-select" value={layer.parentId ?? ''} onChange={(e) => setParent(layer.id, e.target.value || null)}>
+            <option value="">None</option>
+            {parents.map((p) => (
+              <option key={p.id} value={p.id}>
+                {comp.layers.indexOf(p) + 1}. {p.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   );
-}
-
-function typeGlyph(t: Layer['type']): string {
-  return { solid: '■', shape: '★', text: 'T', image: '▣', precomp: '❏', null: '▢', adjustment: '◍' }[t];
 }
 
 function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
@@ -686,7 +734,7 @@ function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
   return (
     <div className="group-left" style={{ paddingLeft: 40 + row.depth * 16 }}>
       <button className={`twirl ${row.open ? 'open' : ''}`} onClick={() => setExpanded(row.id, !row.open)}>
-        ▸
+        <Icon name="chevronRight" size={12} />
       </button>
       {fx && (
         <button className={`sw fxsw ${fx.enabled ? 'on' : ''}`} title="Enable / disable effect" onClick={() => setEffectEnabled(layer.id, fx.id, !fx.enabled)}>
@@ -713,18 +761,18 @@ function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
             <input type="checkbox" checked={mask.inverted} onChange={(e) => setMaskField(layer.id, mask.id, { inverted: e.target.checked })} data-testid="mask-invert" /> Inv
           </label>
           <button className="sw danger" title="Remove mask" onClick={() => removeMask(layer.id, mask.id)}>
-            ✕
+            <Icon name="close" size={12} />
           </button>
         </>
       )}
       {animId && (
         <button className="sw danger" title="Remove animator" onClick={() => removeTextAnimator(layer.id, animId)}>
-          ✕
+          <Icon name="close" size={12} />
         </button>
       )}
       {fx && (
         <button className="sw danger" title="Remove effect" onClick={() => removeEffect(layer.id, fx.id)}>
-          ✕
+          <Icon name="close" size={12} />
         </button>
       )}
     </div>
@@ -746,14 +794,20 @@ function PropLeft({ row, onMenu }: { row: Extract<Row, { kind: 'prop' }>; onMenu
       <span className="kfnav">
         {animated && (
           <>
-            <button title="Previous keyframe" onClick={() => jump(-1)}>◂</button>
-            <button className={atKey ? 'on' : ''} title="Add / remove keyframe at playhead" onClick={() => toggleKeyHere(layer.id, group, propKey)}>◆</button>
-            <button title="Next keyframe" onClick={() => jump(1)}>▸</button>
+            <button title="Previous keyframe" onClick={() => jump(-1)}>
+              <Icon name="prev" size={11} />
+            </button>
+            <button className={atKey ? 'on' : ''} title="Add / remove keyframe at playhead" onClick={() => toggleKeyHere(layer.id, group, propKey)}>
+              <Icon name={atKey ? 'diamondFilled' : 'diamond'} size={12} />
+            </button>
+            <button title="Next keyframe" onClick={() => jump(1)}>
+              <Icon name="next" size={11} />
+            </button>
           </>
         )}
       </span>
       <button className={`stopwatch ${animated ? 'on' : ''}`} title="Toggle animation (stopwatch)" onClick={() => toggleStopwatch(layer.id, group, propKey)} data-testid={`sw-${propKey}`}>
-        ⏱
+        <Icon name="clock" size={13} />
       </button>
       <span className="plabel">
         {prop.label}
@@ -804,8 +858,8 @@ function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp
   const style: CSSProperties = {
     left: layer.inPoint * pps,
     width: Math.max(4, (layer.outPoint - layer.inPoint) * pps),
-    background: `${color}cc`,
-    borderColor: color,
+    background: `linear-gradient(180deg, ${color}66, ${color}40)`,
+    borderColor: `${color}b3`,
   };
   return (
     <div className={`layer-bar ${selected ? 'sel' : ''} ${layer.locked ? 'locked' : ''} ${layer.visible ? '' : 'hidden'}`} style={style} onPointerDown={dragBody} data-testid="layer-bar">
@@ -847,3 +901,75 @@ function KeyframeDot({ k, pps, fps, selected, onContext, onEdit }: { k: Keyframe
   );
 }
 
+
+/* ------------------------------------------------------------------ library animations on the timeline */
+
+const SLOT_CLASS: Record<AnimInstance['slot'], string> = { in: 'slot-in', out: 'slot-out', loop: 'slot-loop', emph: 'slot-emph' };
+
+function AnimLeft({ row }: { row: Extract<Row, { kind: 'anim' }> }) {
+  const { layer, inst } = row;
+  const slot = ANIM_SLOTS.find((x) => x.id === inst.slot)!;
+  return (
+    <div className="anim-left" style={{ paddingLeft: 56 }} data-testid="anim-row">
+      <span className={`slot-dot ${SLOT_CLASS[inst.slot]}`} title={slot.hint}>
+        {slot.label}
+      </span>
+      <span className="glabel" title={inst.name}>
+        {inst.name}
+      </span>
+      <span className="spacer" />
+      <small className="dim">{Math.round(inst.strength * 100)}%</small>
+      <button className="sw danger" title="Remove this animation" onClick={() => removeAnim(layer.id, inst.id)}>
+        <Icon name="close" size={12} />
+      </button>
+    </div>
+  );
+}
+
+/** An applied animation as a block on its own row: drag to move it, drag an edge to retime it. */
+function AnimClip({ layer, inst, comp, pps }: { layer: Layer; inst: AnimInstance; comp: Comp; pps: number }) {
+  const span = instanceSpan(layer, inst.id);
+  const timed = !!span && span.end - span.start > 1e-6;
+  const start = timed ? span.start : layer.inPoint;
+  const end = timed ? span.end : layer.outPoint;
+
+  const body = (e: RPointerEvent) => {
+    if (e.button !== 0 || !timed) return;
+    e.preventDefault();
+    e.stopPropagation();
+    let applied = 0;
+    const targets = snapTargets(comp, new Set([layer.id]));
+    startDrag(e, (dx, ev) => {
+      const raw = dx / pps;
+      const dt = snapToFrame(appStore.get().snap && !ev.altKey ? snapDelta(raw, [start, end], targets, pps) : raw, comp.fps);
+      moveAnim(layer.id, inst.id, dt - applied);
+      applied = dt;
+    });
+  };
+  const edge = (which: 'l' | 'r') => (e: RPointerEvent) => {
+    if (e.button !== 0 || !timed) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const targets = snapTargets(comp, new Set([layer.id]));
+    startDrag(e, (dx, ev) => {
+      const raw = dx / pps;
+      const snap = (t: number) => (appStore.get().snap && !ev.altKey ? t + snapDelta(0, [t], targets, pps) : t);
+      if (which === 'l') resizeAnim(layer.id, inst.id, snap(start + raw), end);
+      else resizeAnim(layer.id, inst.id, start, snap(end + raw));
+    });
+  };
+
+  return (
+    <div
+      className={`anim-clip ${SLOT_CLASS[inst.slot]} ${timed ? '' : 'static'}`}
+      style={{ left: start * pps, width: Math.max(10, (end - start) * pps) }}
+      onPointerDown={body}
+      title={timed ? `${inst.name} — ${timecode(start, comp.fps)} to ${timecode(end, comp.fps)}. Drag to move, drag an edge to change how long it takes.` : `${inst.name} — runs for the whole layer`}
+      data-testid="anim-clip"
+    >
+      {timed && <i className="edge l" onPointerDown={edge('l')} />}
+      <span className="clip-name">{inst.name}</span>
+      {timed && <i className="edge r" onPointerDown={edge('r')} />}
+    </div>
+  );
+}

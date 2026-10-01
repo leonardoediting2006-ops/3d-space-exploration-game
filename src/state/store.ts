@@ -34,7 +34,7 @@ export function useStore<T extends object, S>(store: Store<T>, selector: (s: T) 
 }
 
 export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text' | 'anchor' | 'pen';
-export type RightTab = 'effects' | 'library' | 'controls' | 'layer';
+export type RightTab = 'inspector' | 'library';
 export type Quality = 'auto' | 1 | 0.5 | 0.33 | 0.25;
 
 export type Dialog =
@@ -42,7 +42,8 @@ export type Dialog =
   | { kind: 'solid' }
   | { kind: 'export' }
   | { kind: 'shortcuts' }
-  | { kind: 'about' };
+  | { kind: 'about' }
+  | { kind: 'palette' };
 
 export interface AppState {
   project: Project;
@@ -79,8 +80,16 @@ export interface AppState {
   safeMargins: boolean;
 
   rightTab: RightTab;
+  /** Inspector sections the user has collapsed (true = collapsed). */
+  folded: Record<string, boolean>;
+  /** Timeline shows the blend mode / matte / parent columns. */
+  showColumns: boolean;
+  /** Width of the timeline's layer column, in pixels. */
+  tlLeft: number;
+  /** Project panel (compositions and footage) visible. */
+  leftOpen: boolean;
   dialog: Dialog | null;
-  toast: { id: number; text: string } | null;
+  toast: { id: number; text: string; action?: { label: string; run: () => void } } | null;
   assetVersion: number;
 }
 
@@ -114,7 +123,11 @@ export const appStore = createStore<AppState>({
   panY: 0,
   checkerboard: false,
   safeMargins: false,
-  rightTab: 'effects',
+  rightTab: 'inspector',
+  folded: {},
+  showColumns: false,
+  tlLeft: 330,
+  leftOpen: true,
   dialog: null,
   toast: null,
   assetVersion: 0,
@@ -219,10 +232,10 @@ export function resetHistory(): void {
 }
 
 let toastId = 0;
-export function toast(text: string): void {
+export function toast(text: string, action?: { label: string; run: () => void }): void {
   const id = ++toastId;
-  appStore.set({ toast: { id, text } });
+  appStore.set({ toast: { id, text, action } });
   setTimeout(() => {
     if (appStore.get().toast?.id === id) appStore.set({ toast: null });
-  }, 4000);
+  }, action ? 6000 : 4000);
 }

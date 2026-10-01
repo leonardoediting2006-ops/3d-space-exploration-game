@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../core/factory';
 import { baseValue, setKeyAt } from '../core/interp';
 import { apply } from '../core/math';
-import { worldMatrix, layerMap, localMatrix } from '../render/geometry';
+import { layerPolygon, worldMatrix, layerMap, localMatrix } from '../render/geometry';
 import * as A from './actions';
 import { activeComp, appStore, beginGesture, endGesture, redo, resetHistory, timeStore, undo } from './store';
 
@@ -360,5 +360,113 @@ describe('easing presets', () => {
     expect(layers()[0].transform.rotation.keys[0].ease).toBe('bounceIn'); // the segment itself plays backwards
     expect(layers()[0].transform.rotation.keys[1].ease).toBe('linear'); // the new last key has no segment
     void id;
+  });
+});
+
+describe('Inspector actions', () => {
+  const box = (name: string, x: number, y: number, w = 100, h = 60) => {
+    const id = A.addShape('rect', [w, h], [x, y]);
+    A.setLayerField(id, { name });
+    return id;
+  };
+  const posOf = (id: string) => layers().find((l) => l.id === id)!.transform.position.value as number[];
+
+  it('sets a keyframe\'s value and time', () => {
+    const id = A.addSolid({ name: 'S' });
+    A.toggleStopwatch(id, 'transform', 'opacity');
+    timeStore.set({ t: 1 });
+    A.setPropValue(id, 'transform', 'opacity', 40);
+    const keys = layers()[0].transform.opacity.keys;
+    expect(keys).toHaveLength(2);
+    A.setKeyValue(keys[1].id, 70);
+    A.setKeyTime(keys[1].id, 0.5);
+    const after = layers()[0].transform.opacity.keys;
+    expect(after.map((k) => [k.t, k.v])).toEqual([[0, 100], [0.5, 70]]);
+    // moving it before the first key keeps them ordered
+    A.setKeyTime(after[1].id, 0);
+    expect(layers()[0].transform.opacity.keys).toHaveLength(2);
+  });
+
+  it('resets properties to their neutral values, and effect parameters to their defaults', () => {
+    const id = A.addSolid({ name: 'S' });
+    A.setPropValue(id, 'transform', 'rotation', 33);
+    A.setPropValue(id, 'transform', 'scale', [150, 150]);
+    A.resetProp(id, 'transform', 'rotation');
+    A.resetProp(id, 'transform', 'scale');
+    expect(layers()[0].transform.rotation.value).toBe(0);
+    expect(layers()[0].transform.scale.value).toEqual([100, 100]);
+    A.addEffect([id], 'gaussianBlur');
+    const fx = layers()[0].effects[0];
+    A.setPropValue(id, `fx:${fx.id}`, 'blurriness', 77);
+    A.resetProp(id, `fx:${fx.id}`, 'blurriness');
+    expect(layers()[0].effects[0].props.blurriness.value).toBe(10);
+    A.resetProp(id, 'content', 'color'); // no default: harmless
+  });
+
+  it('aligns one layer to the composition and several to each other', () => {
+    const a = box('a', 300, 200);
+    const b = box('b', 800, 500, 200, 100);
+    A.alignLayers([a], 'left');
+    expect(posOf(a)[0]).toBeCloseTo(50, 5); // 100px wide, left edge at 0
+    A.alignLayers([a], 'centerH');
+    expect(posOf(a)[0]).toBeCloseTo(960, 5);
+    A.alignLayers([a], 'bottom');
+    expect(posOf(a)[1]).toBeCloseTo(1080 - 30, 5);
+    A.alignLayers([a, b], 'top');
+    const top = (id: string, h: number) => posOf(id)[1] - h / 2;
+    expect(top(a, 60)).toBeCloseTo(top(b, 100), 5);
+    A.alignLayers([a, b], 'right');
+    expect(posOf(a)[0] + 50).toBeCloseTo(posOf(b)[0] + 100, 5);
+  });
+
+  it('distributes three layers with equal gaps', () => {
+    const a = box('a', 100, 300);
+    const b = box('b', 220, 300);
+    const c = box('c', 900, 300);
+    A.distributeLayers([a, b, c], 'h');
+    const gap1 = posOf(b)[0] - 50 - (posOf(a)[0] + 50);
+    const gap2 = posOf(c)[0] - 50 - (posOf(b)[0] + 50);
+    expect(gap1).toBeCloseTo(gap2, 5);
+    expect(posOf(a)[0]).toBeCloseTo(100, 5);
+    expect(posOf(c)[0]).toBeCloseTo(900, 5);
+  });
+
+  it('aligns children of a rotated parent in composition space', () => {
+    const parent = A.addNull();
+    const child = box('child', 500, 500);
+    A.setParent(child, parent);
+    A.setPropValue(parent, 'transform', 'rotation', 90);
+    A.alignLayers([child], 'left');
+    const poly = (id: string) => {
+      const comp = activeComp();
+      return layerPolygon(appStore.get().project, comp, comp.layers.find((l) => l.id === id)!, 0)!;
+    };
+    expect(Math.min(...poly(child).map((p) => p[0]))).toBeCloseTo(0, 4);
+  });
+
+  it('applies an animation and retimes it through the actions', async () => {
+    const { applyLayerTemplate } = await import('./templateActions');
+    const { findLibraryItem } = await import('../templates');
+    const id = A.addSolid({ name: 'S' });
+    const item = findLibraryItem('motion.slideInLeft')!;
+    if (!('template' in item)) throw new Error('not a layer template');
+    applyLayerTemplate(item);
+    const inst = layers()[0].anims[0];
+    A.setAnimStart(id, inst.id, 2);
+    A.setAnimLength(id, inst.id, 2);
+    A.setAnimStrength(id, inst.id, 0.5);
+    A.alignAnim(id, inst.id, 'end');
+    const l = layers()[0];
+    const keys = l.transform.position.keys;
+    expect(keys[keys.length - 1].t).toBeCloseTo(l.outPoint, 1);
+    expect(l.anims[0].strength).toBe(0.5);
+    undo();
+    undo();
+    undo();
+    undo();
+    expect(layers()[0].anims[0].strength).toBe(1);
+    A.removeAnim(id, inst.id);
+    expect(layers()[0].anims).toHaveLength(0);
+    expect(layers()[0].transform.position.keys).toHaveLength(0);
   });
 });

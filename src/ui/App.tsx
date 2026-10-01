@@ -12,6 +12,7 @@ import { installShortcuts } from './shortcuts';
 
 export function App() {
   const tlHeight = useApp((s) => s.tlHeight);
+  const leftOpen = useApp((s) => s.leftOpen);
 
   useEffect(() => installShortcuts(), []);
 
@@ -60,8 +61,8 @@ export function App() {
     <div className="app">
       <MenuBar />
       <div className="workspace" style={{ gridTemplateRows: `minmax(200px, 1fr) 6px ${tlHeight}px` }}>
-        <div className="top">
-          <ProjectPanel />
+        <div className={`top ${leftOpen ? '' : 'no-left'}`}>
+          {leftOpen ? <ProjectPanel /> : <button className="left-tab" title="Show the project panel" onClick={() => appStore.set({ leftOpen: true })}>Project</button>}
           <div className="center">
             <Toolbar />
             <Viewer />

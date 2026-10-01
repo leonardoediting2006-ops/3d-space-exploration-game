@@ -1,24 +1,52 @@
 import { useMemo, useState } from 'react';
 import { gradientCss } from '../core/gradient';
+import type { Layer } from '../core/types';
+import { toggleFavorite, useFavorites } from '../state/favorites';
 import { applyGradient, applyLibraryItem } from '../state/templateActions';
-import { useApp } from '../state/store';
-import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, type LibraryItem } from '../templates';
-import type { LibraryCategory } from '../templates/types';
+import { useActiveComp, useApp } from '../state/store';
+import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, findLibraryItem, type LibraryItem } from '../templates';
 import { presetGradient } from '../templates/gradients';
+import { templateSource, type LibraryCategory } from '../templates/types';
 import { EaseThumb } from './EaseThumb';
+import { Icon } from './Icon';
 import { TemplateThumb } from './TemplateThumb';
 
+type Tab = LibraryCategory | 'favorites';
+
 const HINTS: Record<LibraryCategory, string> = {
-  textStyle: 'Click a style to apply it to the selected text layers. With nothing selected, a new text layer is created.',
-  textAnim: 'Animations are built from text animators: edit them in the timeline (press U). Hover a card to preview.',
-  gradient: 'Click to fill the selected layers with a gradient (or add a gradient background). “BG” always adds a background.',
-  easing: 'Applies to the selected keyframes — or every keyframe on the selected layers if none are selected.',
-  motion: 'Keyframes start at the playhead on the selected layers. Hover a card to preview.',
-  effect: 'One-click looks built from effects. They replace the previous look on the layer.',
+  textStyle: 'Click a style to apply it to the selected text. With nothing selected, a new text layer is made.',
+  textAnim: 'Pick one, then fine-tune timing, strength and easing under Inspector → Animate. Hover a card to preview.',
+  gradient: 'Click to fill the selected layers with a gradient, or add a gradient background. “BG” always adds a background.',
+  easing: 'Applies to the selected keyframes, or every keyframe on the selected layers if none are selected.',
+  motion: 'Plays from the playhead on the selected layers. Retime it afterwards under Inspector → Animate.',
+  effect: 'One-click looks built from effects. Tweak every setting afterwards in the Inspector.',
   scene: 'Ready-made layers inserted at the top of the stack, starting at the playhead.',
 };
 
-function Card({ item }: { item: LibraryItem }) {
+/** Has this template already been applied to the layer? Shown as a tick on its card. */
+function appliedTo(layer: Layer | undefined, item: LibraryItem): boolean {
+  if (!layer || !('template' in item)) return false;
+  const source = templateSource(item.id);
+  return layer.anims.some((a) => a.template === item.id) || layer.effects.some((e) => e.source === source) || layer.animators.some((a) => a.source === source);
+}
+
+function Star({ id }: { id: string }) {
+  const on = useFavorites().includes(id);
+  return (
+    <button
+      className={`tpl-fav ${on ? 'on' : ''}`}
+      title={on ? 'Remove from favourites' : 'Add to favourites'}
+      onClick={(e) => {
+        e.stopPropagation();
+        toggleFavorite(id);
+      }}
+    >
+      <Icon name={on ? 'heartFilled' : 'heart'} size={12} />
+    </button>
+  );
+}
+
+function Card({ item, applied }: { item: LibraryItem; applied: boolean }) {
   if (item.category === 'gradient') {
     const css = gradientCss(presetGradient(item.gradient), 90);
     return (
@@ -36,6 +64,7 @@ function Card({ item }: { item: LibraryItem }) {
           </button>
         </div>
         <span className="tpl-name">{item.name}</span>
+        <Star id={item.id} />
       </div>
     );
   }
@@ -48,9 +77,15 @@ function Card({ item }: { item: LibraryItem }) {
     );
   }
   return (
-    <div className="tpl-card" title={item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`}>
+    <div className={`tpl-card ${applied ? 'applied' : ''}`} title={applied ? `${item.name} — applied to the selected layer` : item.name} onClick={() => applyLibraryItem(item)} data-testid={`tpl-${item.id}`}>
       <TemplateThumb item={item} />
       <span className="tpl-name">{item.name}</span>
+      {applied && (
+        <span className="tpl-badge" title="Applied to the selected layer">
+          <Icon name="check" size={11} />
+        </span>
+      )}
+      <Star id={item.id} />
     </div>
   );
 }
@@ -58,42 +93,60 @@ function Card({ item }: { item: LibraryItem }) {
 const matches = (item: LibraryItem, needle: string) => item.name.toLowerCase().includes(needle) || item.group.toLowerCase().includes(needle);
 
 export function LibraryPanel() {
-  const [cat, setCat] = useState<LibraryCategory>('textStyle');
+  const [cat, setCat] = useState<Tab>('textStyle');
   const [q, setQ] = useState('');
   const needle = q.trim().toLowerCase();
-  // re-render when selection changes so hints stay current (cheap)
-  useApp((s) => s.selection.length);
+  const favorites = useFavorites();
+  const comp = useActiveComp();
+  const firstId = useApp((s) => s.selection[0]);
+  const layer = comp.layers.find((l) => l.id === firstId);
+
+  const favItems = useMemo(() => favorites.map((id) => findLibraryItem(id)).filter((i): i is LibraryItem => !!i), [favorites]);
 
   const sections = useMemo(() => {
-    if (!needle) return [{ category: cat, groups: groupItems(LIBRARY[cat]) }];
-    return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(LIBRARY[c].filter((i) => matches(i, needle))) })).filter((s) => s.groups.length);
-  }, [cat, needle]);
+    if (needle) return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(LIBRARY[c].filter((i) => matches(i, needle))) })).filter((s) => s.groups.length);
+    if (cat === 'favorites') {
+      return LIBRARY_ORDER.map((c) => ({ category: c, groups: groupItems(favItems.filter((i) => i.category === c)) })).filter((s) => s.groups.length);
+    }
+    return [{ category: cat, groups: groupItems(LIBRARY[cat]) }];
+  }, [cat, needle, favItems]);
 
   const shown = sections.reduce((n, s) => n + s.groups.reduce((m, [, items]) => m + items.length, 0), 0);
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    ...(favorites.length ? [{ id: 'favorites' as const, label: '♥ Favourites', count: favItems.length }] : []),
+    ...LIBRARY_ORDER.map((c) => ({ id: c as Tab, label: CATEGORY_LABELS[c], count: LIBRARY[c].length })),
+  ];
 
   return (
     <div className="library" data-testid="library">
-      <input className="search" placeholder={`Search ${TEMPLATE_COUNT} templates…`} value={q} onChange={(e) => setQ(e.target.value)} data-testid="library-search" />
-      {!needle && (
-        <div className="lib-cats">
-          {LIBRARY_ORDER.map((c) => (
-            <button key={c} className={cat === c ? 'active' : ''} onClick={() => setCat(c)} data-testid={`lib-cat-${c}`}>
-              {CATEGORY_LABELS[c]} <small>{LIBRARY[c].length}</small>
-            </button>
-          ))}
+      <div className="lib-top">
+        <input className="search" placeholder={`Search ${TEMPLATE_COUNT} templates…`} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} data-testid="library-search" />
+        {!needle && (
+          <div className="lib-cats">
+            {tabs.map((t) => (
+              <button key={t.id} className={cat === t.id ? 'active' : ''} onClick={() => setCat(t.id)} data-testid={`lib-cat-${t.id}`}>
+                {t.label} <small>{t.count}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {!needle && cat !== 'favorites' && <div className="hint lib-hint">{HINTS[cat]}</div>}
+      {!needle && cat === 'favorites' && <div className="hint lib-hint">Your starred templates. Hover a card and click the heart to add or remove.</div>}
+      {needle && (
+        <div className="hint lib-hint">
+          {shown} match{shown === 1 ? '' : 'es'}
         </div>
       )}
-      {!needle && <div className="hint lib-hint">{HINTS[cat]}</div>}
-      {needle && <div className="hint lib-hint">{shown} match{shown === 1 ? '' : 'es'}</div>}
       {sections.map((sec) => (
         <div key={sec.category}>
-          {needle && <h3 className="lib-cat-title">{CATEGORY_LABELS[sec.category]}</h3>}
+          {(needle || cat === 'favorites') && <h3 className="lib-cat-title">{CATEGORY_LABELS[sec.category]}</h3>}
           {sec.groups.map(([group, items]) => (
             <section key={group}>
               <h4>{group}</h4>
               <div className={`tpl-grid ${sec.category}`}>
                 {items.map((item) => (
-                  <Card key={item.id} item={item} />
+                  <Card key={item.id} item={item} applied={appliedTo(layer, item)} />
                 ))}
               </div>
             </section>

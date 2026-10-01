@@ -73,29 +73,36 @@ export function pruneInstances(layer: Layer): void {
 
 /** What existed before a template ran, so `adoptNew` can tell what the template added. */
 export interface Snapshot {
-  keys: Set<string>;
+  /** Every keyframe that existed, by id, with a fingerprint of what it held. */
+  keys: Map<string, string>;
   fx: Set<string>;
   animators: Set<string>;
   /** Properties that already wiggled, and how (a template may replace the wiggle on one). */
   wiggles: Map<Prop, string>;
 }
 
+const keyPrint = (k: Keyframe): string => JSON.stringify([k.t, k.v, k.ease, k.sIn, k.sOut]);
+
 export function snapshot(layer: Layer): Snapshot {
-  const keys = new Set<string>();
+  const keys = new Map<string, string>();
   const wiggles = new Map<Prop, string>();
   for (const prop of layerProps(layer)) {
-    for (const k of prop.keys) keys.add(k.id);
+    for (const k of prop.keys) keys.set(k.id, keyPrint(k));
     if (prop.wiggle) wiggles.set(prop, JSON.stringify(prop.wiggle));
   }
   return { keys, fx: new Set(layer.effects.map((e) => e.id)), animators: new Set(layer.animators.map((a) => a.id)), wiggles };
 }
 
-/** Tag everything that appeared since `before` with `instId`. Returns how many things were tagged. */
+/**
+ * Tag everything that appeared since `before` with `instId`: new keyframes, effects and animators,
+ * and any existing keyframe the template rewrote (two keyframes cannot share a moment, so a
+ * template starting on top of an existing key takes it over). Returns how many things were tagged.
+ */
 export function adoptNew(layer: Layer, before: Snapshot, instId: string): number {
   let n = 0;
   for (const prop of layerProps(layer)) {
     for (const k of prop.keys) {
-      if (!before.keys.has(k.id)) {
+      if (before.keys.get(k.id) !== keyPrint(k)) {
         k.src = instId;
         n++;
       }
@@ -167,23 +174,24 @@ export function setInstanceLength(layer: Layer, instId: string, length: number):
   for (const p of props) sortKeys(p);
 }
 
-/** Give every segment of the animation the same easing. */
-export function setInstanceEase(layer: Layer, instId: string, ease: Ease): void {
+/** The keyframes whose outgoing segment belongs to the animation: every tagged key but the last of each property. */
+function segmentKeys(layer: Layer, instId: string): Keyframe[] {
   const byProp = new Map<Prop, Keyframe[]>();
   for (const { prop, key } of instanceKeys(layer, instId)) byProp.set(prop, [...(byProp.get(prop) ?? []), key]);
-  for (const keys of byProp.values()) {
-    keys.sort((a, b) => a.t - b.t);
-    // the last key's ease only matters when something follows it, so leave it alone
-    for (const k of keys.slice(0, -1)) k.ease = typeof ease === 'string' ? ease : [...ease];
-  }
+  const out: Keyframe[] = [];
+  for (const keys of byProp.values()) out.push(...keys.sort((a, b) => a.t - b.t).slice(0, -1));
+  return out;
 }
 
-/** The ease most of the instance's segments use, for display. Null when it has no segments. */
+/** Give every segment of the animation the same easing. */
+export function setInstanceEase(layer: Layer, instId: string, ease: Ease): void {
+  for (const k of segmentKeys(layer, instId)) k.ease = typeof ease === 'string' ? ease : [...ease];
+}
+
+/** The ease most of the animation's segments use, for display. Null when it has no segments. */
 export function instanceEase(layer: Layer, instId: string): Ease | null {
-  const keys = instanceKeys(layer, instId);
   const counts = new Map<string, { ease: Ease; n: number }>();
-  for (const { prop, key } of keys) {
-    if (prop.keys[prop.keys.length - 1] === key) continue;
+  for (const key of segmentKeys(layer, instId)) {
     const id = JSON.stringify(key.ease);
     const c = counts.get(id);
     if (c) c.n++;
@@ -259,4 +267,28 @@ export function setInstanceSpeed(layer: Layer, instId: string, freq: number): vo
   const w = instanceWiggles(layer, instId);
   const f = w.length ? freq / w[0].wiggle!.freq : 1;
   for (const p of w) p.wiggle!.freq *= f;
+}
+
+/** Set a static text-animator setting (units, random order…) on every animator an instance owns. */
+export function setInstanceAnimatorSetting(layer: Layer, instId: string, key: 'units' | 'random' | 'seed' | 'smooth', value: number): void {
+  for (const a of layer.animators) {
+    const p = a.inst === instId ? a.props[key] : undefined;
+    if (p && !p.keys.length) p.value = value;
+  }
+}
+
+/** Read one such setting from the instance's first animator, or null if it owns none. */
+export function instanceAnimatorSetting(layer: Layer, instId: string, key: 'units' | 'random' | 'seed' | 'smooth'): number | null {
+  const a = layer.animators.find((x) => x.inst === instId);
+  const p = a?.props[key];
+  return p && !p.keys.length ? (p.value as number) : null;
+}
+
+/** Set the first and last moment of an animation in one step (dragging a clip's edge on the timeline). */
+export function setInstanceSpan(layer: Layer, instId: string, start: number, end: number): void {
+  const span = instanceSpan(layer, instId);
+  if (!span) return;
+  const len = Math.max(1e-3, end - start);
+  if (span.end - span.start > 1e-9) setInstanceLength(layer, instId, len);
+  setInstanceStart(layer, instId, start);
 }

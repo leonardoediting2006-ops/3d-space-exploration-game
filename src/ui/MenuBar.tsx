@@ -28,6 +28,7 @@ import {
   timeReverseKeys,
 } from '../state/actions';
 import { activeComp, appStore, redo, timeStore, toast, undo, useApp } from '../state/store';
+import { Icon } from './Icon';
 
 interface Entry {
   label?: string;
@@ -52,6 +53,8 @@ export function MenuBar() {
   const dirty = useApp((s) => s.dirty);
   const checker = useApp((s) => s.checkerboard);
   const safe = useApp((s) => s.safeMargins);
+  const leftOpen = useApp((s) => s.leftOpen);
+  const columns = useApp((s) => s.showColumns);
 
   useEffect(() => {
     const close = (e: PointerEvent) => {
@@ -100,7 +103,7 @@ export function MenuBar() {
     ],
     Composition: [
       { label: 'New Composition…', run: () => openDialog({ kind: 'compSettings', compId: null }) },
-      { label: 'Composition Settings…', shortcut: 'Ctrl+K', run: () => openDialog({ kind: 'compSettings', compId: appStore.get().activeCompId }) },
+      { label: 'Composition Settings…', shortcut: 'Ctrl+Shift+K', run: () => openDialog({ kind: 'compSettings', compId: appStore.get().activeCompId }) },
       { sep: true },
       { label: 'Set Work Area Start (B)', run: () => setWorkArea(timeStore.get().t, activeComp().workEnd) },
       { label: 'Set Work Area End (N)', run: () => setWorkArea(activeComp().workStart, timeStore.get().t) },
@@ -145,10 +148,14 @@ export function MenuBar() {
       { label: 'Transparency Grid', checked: checker, run: () => appStore.set({ checkerboard: !checker }) },
       { label: 'Safe Margins & Guides', checked: safe, run: () => appStore.set({ safeMargins: !safe }) },
       { sep: true },
+      { label: 'Project Panel', checked: leftOpen, run: () => appStore.set({ leftOpen: !leftOpen }) },
+      { label: 'Timeline Columns (blend, matte, parent)', checked: columns, run: () => appStore.set({ showColumns: !columns }) },
+      { sep: true },
       { label: 'Go to Start', shortcut: 'Home', run: () => setTime(0) },
       { label: 'Go to End', shortcut: 'End', run: () => setTime(activeComp().duration) },
     ],
     Help: [
+      { label: 'Command Palette…', shortcut: 'Ctrl+K', run: () => openDialog({ kind: 'palette' }) },
       { label: 'Keyboard Shortcuts', run: () => openDialog({ kind: 'shortcuts' }) },
       { label: 'About Keyframe Studio', run: () => openDialog({ kind: 'about' }) },
     ],
@@ -156,7 +163,10 @@ export function MenuBar() {
 
   return (
     <div className="menubar" ref={barRef}>
-      <div className="brand">◆ Keyframe Studio</div>
+      <div className="brand">
+        <Icon name="diamondFilled" size={13} />
+        Keyframe Studio
+      </div>
       {Object.entries(menus).map(([name, entries]) => (
         <div key={name} className="menu">
           <button
@@ -191,9 +201,25 @@ export function MenuBar() {
           )}
         </div>
       ))}
-      <div className="file-title">
-        {fileName}
-        {dirty ? ' •' : ''}
+      <div className="file-title" title={fileName}>
+        {fileName.replace(/\.kfs$/, '')}
+        {dirty && <i className="dirty" title="Unsaved changes" />}
+      </div>
+      <div className="menubar-right">
+        <button className="icon-btn" title="Undo (Ctrl+Z)" disabled={undoCount === 0} onClick={undo} data-testid="undo-btn">
+          <Icon name="undo" />
+        </button>
+        <button className="icon-btn" title="Redo (Ctrl+Shift+Z)" disabled={redoCount === 0} onClick={redo}>
+          <Icon name="redo" />
+        </button>
+        <button className="palette-btn" title="Search every command, effect and template" onClick={() => openDialog({ kind: 'palette' })} data-testid="palette-btn">
+          <Icon name="search" size={14} />
+          <span>Search…</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <button className="primary" onClick={() => openDialog({ kind: 'export' })} data-testid="export-btn">
+          <Icon name="download" size={14} /> Export
+        </button>
       </div>
       <input
         ref={fileRef}

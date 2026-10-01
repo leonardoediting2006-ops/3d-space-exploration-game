@@ -79,7 +79,7 @@ export function applyLayerTemplate(item: Extract<LibraryItem, { template: unknow
       }
     }
   });
-  if (ok) toast(`Applied “${tpl.name}”`);
+  if (ok) toast(`Applied “${tpl.name}”`, { label: 'Customize', run: () => appStore.set({ rightTab: 'inspector' }) });
 }
 
 export function insertScene(item: Extract<LibraryItem, { scene: unknown }>): void {

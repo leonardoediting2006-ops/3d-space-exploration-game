@@ -14,7 +14,7 @@ import {
   setInstanceStrength,
 } from './anims';
 import { createComp, createProject, createShape, createText } from './factory';
-import { evalNum, evalVec } from './interp';
+import { evalNum, evalVec, setKeyAt } from './interp';
 import { parseProject, serializeProject } from './serialize';
 import type { Layer, Project } from './types';
 
@@ -128,6 +128,27 @@ describe('applying an animation', () => {
         expect(JSON.stringify({ t: layer.transform, e: layer.effects.length, a: layer.animators.length }), item.id).toBe(before);
       }
     }
+  });
+});
+
+describe('animations on layers that already have keyframes', () => {
+  it('takes over a keyframe it lands on, and reports its own segments\' easing', () => {
+    const { ctx, shape } = setup(1);
+    // the user's own animation: two position keys, the first exactly where the template will start
+    setKeyAt(shape.transform.position, 1, [100, 100], 0.01, 'linear');
+    setKeyAt(shape.transform.position, 5, [900, 400], 0.01, 'linear');
+    applyTemplateToLayer(shape, tpl('motion.slideInLeft'), ctx);
+    const id = shape.anims[0].id;
+    const tagged = instanceKeys(shape, id).filter((k) => k.prop === shape.transform.position);
+    expect(tagged.map((k) => k.key.t)).toEqual([1, 1.8]);
+    expect(shape.transform.position.keys.find((k) => k.t === 5)?.src).toBeUndefined();
+    // the segment leaving 1.8s (linear, towards the user's key at 5s) is not part of the animation
+    expect(instanceEase(shape, id)).not.toBe('linear');
+    setInstanceEase(shape, id, 'bounceOut');
+    expect(shape.transform.position.keys.find((k) => k.t === 1.8)?.ease).toBe('linear');
+    // removing the animation leaves the user's untouched key behind
+    removeInstance(shape, id);
+    expect(shape.transform.position.keys.map((k) => k.t)).toEqual([5]);
   });
 });
 
