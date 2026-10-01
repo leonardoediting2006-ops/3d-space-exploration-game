@@ -10,6 +10,20 @@ export function layerProps(layer: Layer): Prop[] {
   return out;
 }
 
+export interface PropEntry {
+  group: PropGroup;
+  key: string;
+  prop: Prop;
+}
+
+/** Every property on a layer with its address. */
+export function layerPropEntries(layer: Layer): PropEntry[] {
+  const out: PropEntry[] = TRANSFORM_KEYS.map((k) => ({ group: 'transform' as PropGroup, key: k, prop: layer.transform[k] }));
+  for (const [k, p] of Object.entries(layer.content)) out.push({ group: 'content', key: k, prop: p });
+  for (const fx of layer.effects) for (const [k, p] of Object.entries(fx.props)) out.push({ group: `fx:${fx.id}`, key: k, prop: p });
+  return out;
+}
+
 export function resolveProp(layer: Layer, group: PropGroup, key: string): Prop | undefined {
   if (group === 'transform') return layer.transform[key as keyof Layer['transform']];
   if (group === 'content') return layer.content[key];
@@ -110,3 +124,20 @@ export const PRESETS: Preset[] = [
     },
   },
 ];
+
+export interface FoundKey {
+  layer: Layer;
+  prop: Prop;
+  index: number;
+}
+
+/** Locate a keyframe by id anywhere in a list of layers. */
+export function findKey(layers: Layer[], keyId: string): FoundKey | null {
+  for (const layer of layers) {
+    for (const prop of layerProps(layer)) {
+      const index = prop.keys.findIndex((k) => k.id === keyId);
+      if (index >= 0) return { layer, prop, index };
+    }
+  }
+  return null;
+}

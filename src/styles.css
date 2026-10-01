@@ -1235,3 +1235,63 @@ kbd {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   max-width: 80vw;
 }
+
+/* ---------------------------------------------------------------- easing editor */
+.ease-editor {
+  position: fixed;
+  z-index: 120;
+  width: 232px;
+  padding: 8px 10px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+.ease-editor header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.ease-editor svg {
+  display: block;
+  background: #15161a;
+  border-radius: 6px;
+  touch-action: none;
+}
+.ee-box {
+  fill: none;
+  stroke: #3a3b44;
+  stroke-dasharray: 3 3;
+}
+.ee-curve {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.ee-handle-line {
+  stroke: #7c7f8a;
+  stroke-width: 1;
+}
+.ee-handle {
+  fill: #fff;
+  stroke: var(--accent-2);
+  stroke-width: 2;
+  cursor: grab;
+}
+.ee-values {
+  margin: 6px 0 4px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.ee-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ee-hint {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--dim);
+}

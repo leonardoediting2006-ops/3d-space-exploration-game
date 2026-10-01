@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react';
 import { getEffectDef } from '../core/effectDefs';
-import { EASE_IN, EASE_OUT, EASY_EASE } from '../core/interp';
 import { snapToFrame, timecode, parseTimecode } from '../core/time';
 import {
   BLEND_MODES,
@@ -9,7 +8,6 @@ import {
   TRANSFORM_KEYS,
   type BlendMode,
   type Comp,
-  type Ease,
   type Keyframe,
   type Layer,
   type MatteMode,
@@ -17,6 +15,7 @@ import {
   type PropGroup,
 } from '../core/types';
 import {
+  applyKeyEase,
   deleteKeys,
   moveKeys,
   moveLayerToIndex,
@@ -26,7 +25,6 @@ import {
   selectLayers,
   setEffectEnabled,
   setExpanded,
-  setKeysEase,
   setLayerField,
   setLoop,
   setParent,
@@ -35,11 +33,13 @@ import {
   setWorkArea,
   toggleKeyHere,
   toggleLayerSelected,
+  timeReverseKeys,
   toggleStopwatch,
   trimLayer,
   updateComp,
 } from '../state/actions';
 import { appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp, useTime } from '../state/store';
+import { EaseEditor } from './EaseEditor';
 import { PropEditor, useTimeIf } from './fields';
 
 const LEFT_W = 600;
@@ -102,6 +102,29 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
   return rows;
 }
 
+/** Times a dragged layer edge or keyframe can stick to. */
+function snapTargets(comp: Comp, exclude: Set<string>): number[] {
+  const out = [0, comp.duration, comp.workStart, comp.workEnd, timeStore.get().t];
+  for (const l of comp.layers) if (!exclude.has(l.id)) out.push(l.inPoint, l.outPoint);
+  return out;
+}
+
+/** Nudge a drag delta so one of `edges` lands on a target, if any is within ~8 px. */
+function snapDelta(dt: number, edges: number[], targets: number[], pps: number): number {
+  let best = dt;
+  let bestAbs = 8 / pps;
+  for (const e of edges) {
+    for (const t of targets) {
+      const d = t - (e + dt);
+      if (Math.abs(d) < bestAbs) {
+        bestAbs = Math.abs(d);
+        best = dt + d;
+      }
+    }
+  }
+  return best;
+}
+
 /** Window-level drag so a gesture survives the pointer leaving the element that started it. */
 function startDrag(e: RPointerEvent, onMove: (dx: number, ev: PointerEvent) => void, onEnd?: () => void): void {
   const startX = e.clientX;
@@ -135,6 +158,7 @@ export function Timeline() {
   const selection = useApp((s) => s.selection);
   const selKeys = useApp((s) => s.selKeys);
   const playing = useApp((s) => s.playing);
+  const snapOn = useApp((s) => s.snap);
   const rows = useMemo(() => buildRows(comp, expanded, showOnly), [comp, expanded, showOnly]);
   const selKeySet = useMemo(() => new Set(selKeys), [selKeys]);
   const selSet = useMemo(() => new Set(selection), [selection]);
@@ -144,6 +168,7 @@ export function Timeline() {
   const rulerInner = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [easing, setEasing] = useState<{ keyId: string; x: number; y: number } | null>(null);
 
   const width = Math.max(comp.duration * pps + 120, 400);
   const totalH = rows.reduce((n, r) => n + rowHeight(r), 0);
@@ -213,13 +238,14 @@ export function Timeline() {
   const keyMenu = (e: React.MouseEvent, k: Keyframe) => {
     const ids = selKeySet.has(k.id) ? selKeys : [k.id];
     if (!selKeySet.has(k.id)) selectKeys([k.id]);
-    const ease = (label: string, v: Ease) => ({ label, onClick: () => setKeysEase(ids, v) });
     openMenu(e, [
-      ease('Linear', 'linear'),
-      ease('Easy Ease', EASY_EASE),
-      ease('Ease In (slow start)', EASE_IN),
-      ease('Ease Out (slow end)', EASE_OUT),
-      ease('Hold', 'hold'),
+      { label: 'Easy Ease  (F9)', onClick: () => applyKeyEase(ids, 'both') },
+      { label: 'Easy Ease In  (Shift+F9)', onClick: () => applyKeyEase(ids, 'in') },
+      { label: 'Easy Ease Out  (Ctrl+Shift+F9)', onClick: () => applyKeyEase(ids, 'out') },
+      { label: 'Linear', onClick: () => applyKeyEase(ids, 'linear') },
+      { label: 'Hold', onClick: () => applyKeyEase(ids, 'hold') },
+      { label: 'Edit Easing Curve…', onClick: () => setEasing({ keyId: k.id, x: e.clientX, y: e.clientY }) },
+      { label: 'Time-Reverse Keyframes', onClick: () => timeReverseKeys(ids) },
       { label: 'Delete Keyframe', onClick: () => deleteKeys(ids) },
     ]);
   };
@@ -300,6 +326,9 @@ export function Timeline() {
         >
           ◐ Motion Blur
         </button>
+        <button className={snapOn ? 'on' : ''} title="Snap layer edges and keyframes to the playhead and other layers (hold Alt to bypass)" onClick={() => appStore.set({ snap: !snapOn })} data-testid="snap-toggle">
+          ⌖ Snap
+        </button>
         <span className="tl-spacer" />
         <button title="Fit timeline to window" onClick={fitWidth}>⇔</button>
         <input
@@ -377,7 +406,7 @@ export function Timeline() {
                     {r.kind === 'layer' && <LayerBar layer={r.layer} comp={comp} pps={pps} selected={selSet.has(r.layer.id)} onSelect={(e) => selectLayer(r.layer, e)} />}
                     {r.kind === 'prop' &&
                       r.prop.keys.map((k) => (
-                        <KeyframeDot key={k.id} k={k} pps={pps} fps={comp.fps} selected={selKeySet.has(k.id)} onContext={keyMenu} />
+                        <KeyframeDot key={k.id} k={k} pps={pps} fps={comp.fps} selected={selKeySet.has(k.id)} onContext={keyMenu} onEdit={(ev) => setEasing({ keyId: k.id, x: ev.clientX, y: ev.clientY })} />
                       ))}
                   </div>
                 );
@@ -387,6 +416,8 @@ export function Timeline() {
           </div>
         </div>
       </div>
+
+      {easing && <EaseEditor keyId={easing.keyId} x={easing.x} y={easing.y} onClose={() => setEasing(null)} />}
 
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onPointerDown={(e) => e.stopPropagation()}>
@@ -681,8 +712,12 @@ function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp
     e.preventDefault();
     let applied = 0;
     const group = ids();
-    startDrag(e, (dx) => {
-      const dt = snap(dx / pps);
+    const moving = new Set(group);
+    const edges = comp.layers.filter((l) => moving.has(l.id)).flatMap((l) => [l.inPoint, l.outPoint]);
+    const targets = snapTargets(comp, moving);
+    startDrag(e, (dx, ev) => {
+      const raw = dx / pps;
+      const dt = snap(appStore.get().snap && !ev.altKey ? snapDelta(raw, edges, targets, pps) : raw);
       moveLayersInTime(group, dt - applied);
       applied = dt;
     });
@@ -692,7 +727,11 @@ function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp
     e.preventDefault();
     if (layer.locked) return;
     const start = edge === 'in' ? layer.inPoint : layer.outPoint;
-    startDrag(e, (dx) => trimLayer(layer.id, edge, start + dx / pps));
+    const targets = snapTargets(comp, new Set([layer.id]));
+    startDrag(e, (dx, ev) => {
+      const raw = dx / pps;
+      trimLayer(layer.id, edge, start + (appStore.get().snap && !ev.altKey ? snapDelta(raw, [start], targets, pps) : raw));
+    });
   };
   const style: CSSProperties = {
     left: layer.inPoint * pps,
@@ -709,7 +748,7 @@ function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp
   );
 }
 
-function KeyframeDot({ k, pps, fps, selected, onContext }: { k: Keyframe; pps: number; fps: number; selected: boolean; onContext: (e: React.MouseEvent, k: Keyframe) => void }) {
+function KeyframeDot({ k, pps, fps, selected, onContext, onEdit }: { k: Keyframe; pps: number; fps: number; selected: boolean; onContext: (e: React.MouseEvent, k: Keyframe) => void; onEdit: (e: React.MouseEvent) => void }) {
   const down = (e: RPointerEvent) => {
     e.stopPropagation();
     if (e.button !== 0) return;
@@ -718,8 +757,10 @@ function KeyframeDot({ k, pps, fps, selected, onContext }: { k: Keyframe; pps: n
     else if (!selected) selectKeys([k.id]);
     const ids = e.shiftKey || selected ? appStore.get().selKeys : [k.id];
     let applied = 0;
-    startDrag(e, (dx) => {
-      const dt = snapToFrame(dx / pps, fps);
+    const playhead = [timeStore.get().t];
+    startDrag(e, (dx, ev) => {
+      const raw = dx / pps;
+      const dt = snapToFrame(appStore.get().snap && !ev.altKey ? snapDelta(raw, [k.t], playhead, pps) : raw, fps);
       moveKeys(ids.length ? ids : [k.id], dt - applied);
       applied = dt;
     });
@@ -731,6 +772,7 @@ function KeyframeDot({ k, pps, fps, selected, onContext }: { k: Keyframe; pps: n
       style={{ left: k.t * pps }}
       onPointerDown={down}
       onContextMenu={(e) => onContext(e, k)}
+      onDoubleClick={onEdit}
       title={`${timecode(k.t, fps)} — ${k.ease === 'linear' ? 'linear' : k.ease === 'hold' ? 'hold' : 'eased'}`}
       data-testid="keyframe"
     />

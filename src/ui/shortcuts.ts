@@ -1,6 +1,8 @@
-import { EASY_EASE } from '../core/interp';
 import { snapToFrame } from '../core/time';
 import {
+  applyKeyEase,
+  copySelection,
+  cutSelection,
   deleteKeys,
   deleteLayers,
   duplicateLayers,
@@ -8,14 +10,15 @@ import {
   moveLayersInTime,
   nudgeSelection,
   openDialog,
+  pasteClipboard,
   precompose,
   revealProps,
   saveProjectFile,
   selectAllLayers,
-  setKeysEase,
   setTime,
   setWorkArea,
   stackMove,
+  splitLayers,
   stepFrames,
   togglePlay,
   trimLayer,
@@ -76,7 +79,23 @@ export function installShortcuts(): () => void {
       }
       if (key === 'd' && sel.length) {
         prevent();
-        return duplicateLayers(sel);
+        return e.shiftKey ? splitLayers(sel) : duplicateLayers(sel);
+      }
+      if (key === 'c' && !e.shiftKey) {
+        prevent();
+        return void copySelection();
+      }
+      if (key === 'x') {
+        prevent();
+        return cutSelection();
+      }
+      if (key === 'v') {
+        prevent();
+        return pasteClipboard();
+      }
+      if (e.code === 'F9' && e.shiftKey) {
+        prevent();
+        return applyKeyEase(s.selKeys, 'out');
       }
       if (key === 'a') {
         prevent();
@@ -128,7 +147,7 @@ export function installShortcuts(): () => void {
         return stepFrames(1);
       case 'F9':
         prevent();
-        if (s.selKeys.length) setKeysEase(s.selKeys, EASY_EASE);
+        applyKeyEase(s.selKeys, e.shiftKey ? 'in' : 'both');
         return;
       case 'BracketLeft':
       case 'BracketRight': {
@@ -174,6 +193,7 @@ export function installShortcuts(): () => void {
     if (key === 'h') return appStore.set({ tool: 'hand' });
     if (key === 'z') return appStore.set({ tool: 'zoom' });
     if (key === 'q') return appStore.set({ tool: 'shape' });
+    if (key === 'y') return appStore.set({ tool: 'anchor' });
   };
 
   const up = (e: KeyboardEvent) => {

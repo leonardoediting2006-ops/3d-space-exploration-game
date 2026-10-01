@@ -8,6 +8,7 @@ const TOOLS: { id: Tool; glyph: string; label: string }[] = [
   { id: 'zoom', glyph: '⌕', label: 'Zoom (Z) — Alt-click zooms out' },
   { id: 'shape', glyph: '▭', label: 'Shape (Q) — drag in the viewer. Shift = square, Alt = from center' },
   { id: 'text', glyph: 'T', label: 'Text — click in the viewer' },
+  { id: 'anchor', glyph: '⊹', label: 'Anchor Point / Pan Behind (Y) — drag to move the anchor without moving the layer' },
 ];
 
 const SHAPES: { id: ShapeKind; label: string }[] = [

@@ -152,6 +152,212 @@ function glow(src: Canvas, threshold: number, radius: number, intensity: number,
   return src;
 }
 
+
+/* ---- transitions, tone curves and generators ---- */
+
+function linearWipe(src: Canvas, completion: number, angleDeg: number, featherPx: number, r: Rect): Canvas {
+  const c = clamp(completion / 100, 0, 1);
+  if (c <= 0) return src;
+  const a = degToRad(angleDeg);
+  const dx = Math.sin(a);
+  const dy = -Math.cos(a);
+  const corners: [number, number][] = [
+    [r.x, r.y],
+    [r.x + r.w, r.y],
+    [r.x, r.y + r.h],
+    [r.x + r.w, r.y + r.h],
+  ];
+  const proj = corners.map(([x, y]) => x * dx + y * dy);
+  const pmin = Math.min(...proj);
+  const pmax = Math.max(...proj);
+  const f = Math.max(0.01, featherPx);
+  const front = pmin + c * (pmax - pmin + f);
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const pc = cx * dx + cy * dy;
+  const ctx = src.getContext('2d')!;
+  const g = ctx.createLinearGradient(cx + dx * (front - f - pc), cy + dy * (front - f - pc), cx + dx * (front - pc), cy + dy * (front - pc));
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,1)');
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.fillStyle = g;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.globalCompositeOperation = 'source-over';
+  return src;
+}
+
+function radialWipe(src: Canvas, completion: number, startDeg: number, center: [number, number], ccw: boolean, featherDeg: number, r: Rect): Canvas {
+  const c = clamp(completion / 100, 0, 1);
+  if (c <= 0) return src;
+  const ctx = src.getContext('2d')!;
+  const g = ctx.createConicGradient(degToRad(startDeg) - Math.PI / 2, center[0], center[1]);
+  const f = clamp(featherDeg / 360, 0, 1);
+  const clear = 'rgba(0,0,0,0)';
+  const solid = 'rgba(0,0,0,1)';
+  if (!ccw) {
+    g.addColorStop(0, clear);
+    g.addColorStop(c, clear);
+    g.addColorStop(Math.min(1, Math.max(c, c + f)), solid);
+    g.addColorStop(1, solid);
+  } else {
+    const edge = 1 - c;
+    g.addColorStop(0, solid);
+    g.addColorStop(Math.max(0, edge - f), solid);
+    g.addColorStop(edge, clear);
+    g.addColorStop(1, clear);
+  }
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.fillStyle = g;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.globalCompositeOperation = 'source-over';
+  return src;
+}
+
+function levels(src: Canvas, r: Rect, inB: number, inW: number, gamma: number, outB: number, outW: number): Canvas {
+  const lut = new Uint8ClampedArray(256);
+  const span = Math.max(1, inW - inB);
+  for (let i = 0; i < 256; i++) {
+    const n = clamp((i - inB) / span, 0, 1);
+    lut[i] = outB + Math.pow(n, 1 / Math.max(0.01, gamma)) * (outW - outB);
+  }
+  mapPixels(src, r, (d) => {
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = lut[d[i]];
+      d[i + 1] = lut[d[i + 1]];
+      d[i + 2] = lut[d[i + 2]];
+    }
+  });
+  return src;
+}
+
+function threshold(src: Canvas, r: Rect, level: number): Canvas {
+  mapPixels(src, r, (d) => {
+    for (let i = 0; i < d.length; i += 4) {
+      const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2] >= level ? 255 : 0;
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+  });
+  return src;
+}
+
+function posterize(src: Canvas, r: Rect, n: number): Canvas {
+  const steps = Math.max(2, Math.round(n)) - 1;
+  mapPixels(src, r, (d) => {
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = Math.round((d[i] / 255) * steps) * (255 / steps);
+      d[i + 1] = Math.round((d[i + 1] / 255) * steps) * (255 / steps);
+      d[i + 2] = Math.round((d[i + 2] / 255) * steps) * (255 / steps);
+    }
+  });
+  return src;
+}
+
+function vignette(src: Canvas, r: Rect, amount: number, size: number, feather: number): Canvas {
+  const ctx = src.getContext('2d')!;
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const R = Math.max(1, (Math.hypot(r.w, r.h) / 2) * (size / 100));
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+  const f = clamp(feather / 100, 0.01, 1);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(clamp(1 - f, 0, 0.99), 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(0,0,0,${clamp(amount / 100, 0, 1)})`);
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = g;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.globalCompositeOperation = 'source-over';
+  return src;
+}
+
+function checkerboard(src: Canvas, r: Rect, size: number, a: number[], b: number[], opacity: number): Canvas {
+  const s = Math.max(1, Math.round(size));
+  const tile = document.createElement('canvas');
+  tile.width = tile.height = s * 2;
+  const t = tile.getContext('2d')!;
+  t.fillStyle = cssColor(a);
+  t.fillRect(0, 0, s * 2, s * 2);
+  t.fillStyle = cssColor(b);
+  t.fillRect(s, 0, s, s);
+  t.fillRect(0, s, s, s);
+  const ctx = src.getContext('2d')!;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.globalAlpha = clamp(opacity / 100, 0, 1);
+  ctx.translate(r.x, r.y);
+  ctx.fillStyle = ctx.createPattern(tile, 'repeat')!;
+  ctx.fillRect(0, 0, r.w, r.h);
+  ctx.restore();
+  return src;
+}
+
+function hash3(x: number, y: number, z: number): number {
+  let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(z, 2147483647)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+function vnoise3(x: number, y: number, z: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const zi = Math.floor(z);
+  const fx = x - xi;
+  const fy = y - yi;
+  const fz = z - zi;
+  const u = fx * fx * (3 - 2 * fx);
+  const v = fy * fy * (3 - 2 * fy);
+  const w = fz * fz * (3 - 2 * fz);
+  const l = (a: number, b: number, t: number) => a + (b - a) * t;
+  return l(
+    l(l(hash3(xi, yi, zi), hash3(xi + 1, yi, zi), u), l(hash3(xi, yi + 1, zi), hash3(xi + 1, yi + 1, zi), u), v),
+    l(l(hash3(xi, yi, zi + 1), hash3(xi + 1, yi, zi + 1), u), l(hash3(xi, yi + 1, zi + 1), hash3(xi + 1, yi + 1, zi + 1), u), v),
+    w,
+  );
+}
+
+function fractalNoise(src: Canvas, r: Rect, o: { contrast: number; brightness: number; scale: number; complexity: number; evolution: number }, outScale: number): Canvas {
+  // Evaluate on a coarse grid and upscale: fractal noise is smooth, and this keeps 4K frames affordable.
+  const ds = Math.max(1, Math.ceil(Math.max(r.w, r.h) / 320));
+  const sw = Math.max(1, Math.ceil(r.w / ds));
+  const sh = Math.max(1, Math.ceil(r.h / ds));
+  const small = document.createElement('canvas');
+  small.width = sw;
+  small.height = sh;
+  const sctx = small.getContext('2d')!;
+  const img = sctx.createImageData(sw, sh);
+  const px = img.data;
+  const z = (o.evolution / 360) * 4;
+  const octaves = clamp(Math.round(o.complexity), 1, 8);
+  const cell = Math.max(1, o.scale * outScale);
+  const gain = (o.contrast / 100) * 2;
+  const lift = 0.5 + o.brightness / 100;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      let n = 0;
+      let amp = 0.5;
+      let freq = 1;
+      let norm = 0;
+      for (let k = 0; k < octaves; k++) {
+        n += amp * vnoise3(((x * ds + r.x) / cell) * freq + k * 17.1, ((y * ds + r.y) / cell) * freq + k * 31.7, z * freq);
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2;
+      }
+      const g = clamp(((n / norm) - 0.5) * gain + lift, 0, 1) * 255;
+      const i = (y * sw + x) * 4;
+      px[i] = px[i + 1] = px[i + 2] = g;
+      px[i + 3] = 255;
+    }
+  }
+  sctx.putImageData(img, 0, 0);
+  const ctx = src.getContext('2d')!;
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(small, 0, 0, sw, sh, r.x, r.y, sw * ds, sh * ds);
+  ctx.restore();
+  return src;
+}
+
 function applyOne(src: Canvas, fx: Effect, ctx: FxContext): Canvas {
   const t = ctx.time;
   const r = ctx.rect;
@@ -259,6 +465,29 @@ function applyOne(src: Canvas, fx: Effect, ctx: FxContext): Canvas {
       });
       return src;
     }
+    case 'linearWipe':
+      return linearWipe(src, n('completion'), n('angle'), n('feather') * ctx.scale, r);
+    case 'radialWipe': {
+      const [cx, cy] = evalVec(p.center, t);
+      return radialWipe(src, n('completion'), n('start'), [cx * ctx.scale, cy * ctx.scale], n('direction') >= 0.5, n('feather'), r);
+    }
+    case 'levels':
+      return levels(src, r, n('inBlack'), n('inWhite'), n('gamma'), n('outBlack'), n('outWhite'));
+    case 'threshold':
+      return threshold(src, r, n('level'));
+    case 'posterize':
+      return posterize(src, r, n('levels'));
+    case 'vignette':
+      return vignette(src, r, n('amount'), n('size'), n('feather'));
+    case 'checkerboard':
+      return checkerboard(src, r, n('size') * ctx.scale, evalColor(p.colorA, t), evalColor(p.colorB, t), n('opacity'));
+    case 'fractalNoise':
+      return fractalNoise(
+        src,
+        r,
+        { contrast: n('contrast'), brightness: n('brightness'), scale: n('scale'), complexity: n('complexity'), evolution: n('evolution') },
+        ctx.scale,
+      );
     default:
       return src;
   }

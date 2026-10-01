@@ -7,6 +7,7 @@ import {
   hitTestLayer,
   layerMap,
   localBounds,
+  localMatrix,
   parentWorld,
   worldMatrix,
   type Rect,
@@ -16,6 +17,7 @@ import {
   addText,
   deleteLayers,
   selectLayers,
+  setAnchorKeepingPlace,
   setManyProps,
   toggleLayerSelected,
   updateLayerData,
@@ -77,7 +79,8 @@ type Drag =
   | { kind: 'move'; start: Vec2; items: { id: string; pos: Vec2; inv: Mat | null }[]; moved: boolean; shiftLayer: string | null }
   | { kind: 'scale'; id: string; handle: number; start: Vec2; anchor: Vec2; scale: Vec2; W: Mat }
   | { kind: 'rotate'; id: string; anchor: Vec2; rot: number; last: number; total: number }
-  | { kind: 'create'; start: Vec2; cur: Vec2 };
+  | { kind: 'create'; start: Vec2; cur: Vec2 }
+  | { kind: 'anchor'; id: string; a0: Vec2; pos0: Vec2; W0: Mat; lin: Mat };
 
 interface EditingText {
   layerId: string;
@@ -332,9 +335,33 @@ export function Viewer() {
       return;
     }
 
-    // select tool
     const c = activeComp(s);
     const t = timeStore.get().t;
+
+    if (tool === 'anchor') {
+      let id = s.selection[0];
+      if (!id) {
+        const hit = pickLayer(p);
+        if (!hit) return;
+        selectLayers([hit]);
+        id = hit;
+      }
+      const l = c.layers.find((x) => x.id === id);
+      if (!l || l.locked) return;
+      el.setPointerCapture(e.pointerId);
+      beginGesture();
+      drag.current = {
+        kind: 'anchor',
+        id,
+        a0: baseValue(l.transform.anchor, t) as Vec2,
+        pos0: baseValue(l.transform.position, t) as Vec2,
+        W0: worldMatrix(l, t, layerMap(c)),
+        lin: localMatrix(l, t),
+      };
+      return;
+    }
+
+    // select tool
     const gh = gizmoHit(p);
     if (gh) {
       const l = c.layers.find((x) => x.id === s.selection[0])!;
@@ -421,6 +448,15 @@ export function Viewer() {
       setManyProps(updates, t);
       return;
     }
+    if (d.kind === 'anchor') {
+      const inv = invert(d.W0);
+      if (!inv) return;
+      const a1 = apply(inv, p);
+      const dp = applyVec(d.lin, [a1[0] - d.a0[0], a1[1] - d.a0[1]]);
+      const r = (v: number) => Math.round(v * 100) / 100;
+      setAnchorKeepingPlace(d.id, [r(a1[0]), r(a1[1])], [r(d.pos0[0] + dp[0]), r(d.pos0[1] + dp[1])]);
+      return;
+    }
     if (d.kind === 'rotate') {
       const a = Math.atan2(p[1] - d.anchor[1], p[0] - d.anchor[0]);
       let delta = a - d.last;
@@ -472,7 +508,7 @@ export function Viewer() {
       schedule();
       return;
     }
-    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate') endGesture();
+    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor') endGesture();
     force((n) => n + 1);
   };
 
@@ -513,7 +549,7 @@ export function Viewer() {
     }
   }
 
-  const cursor = tool === 'hand' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'shape' ? 'crosshair' : tool === 'text' ? 'text' : '';
+  const cursor = tool === 'hand' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'shape' || tool === 'anchor' ? 'crosshair' : tool === 'text' ? 'text' : '';
 
   return (
     <div className="viewer">

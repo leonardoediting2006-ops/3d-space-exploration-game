@@ -134,6 +134,85 @@ export const EFFECTS: EffectDef[] = [
     category: 'Noise & Grain',
     params: [{ key: 'amount', label: 'Amount of Noise', kind: 'number', value: 20, unit: '%', min: 0, max: 100, step: 1, decimals: 0 }],
   },
+  {
+    type: 'linearWipe',
+    name: 'Linear Wipe',
+    category: 'Transition',
+    params: [
+      { key: 'completion', label: 'Transition Completion', kind: 'number', value: 0, unit: '%', min: 0, max: 100, step: 0.5, decimals: 1 },
+      { key: 'angle', label: 'Wipe Angle', kind: 'number', value: 90, unit: '°', step: 1, decimals: 0 },
+      { key: 'feather', label: 'Feather', kind: 'number', value: 0, min: 0, max: 1000, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'radialWipe',
+    name: 'Radial Wipe',
+    category: 'Transition',
+    params: [
+      { key: 'completion', label: 'Transition Completion', kind: 'number', value: 0, unit: '%', min: 0, max: 100, step: 0.5, decimals: 1 },
+      { key: 'start', label: 'Start Angle', kind: 'number', value: 0, unit: '°', step: 1, decimals: 0 },
+      { key: 'center', label: 'Wipe Center', kind: 'vec2', value: (c) => [c.width / 2, c.height / 2], unit: 'px', step: 1, decimals: 0 },
+      { key: 'direction', label: 'Wipe', kind: 'number', value: 0, options: ['Clockwise', 'Counterclockwise'] },
+      { key: 'feather', label: 'Feather', kind: 'number', value: 0, unit: '°', min: 0, max: 180, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'levels',
+    name: 'Levels',
+    category: 'Color Correction',
+    params: [
+      { key: 'inBlack', label: 'Input Black', kind: 'number', value: 0, min: 0, max: 255, step: 1, decimals: 0 },
+      { key: 'inWhite', label: 'Input White', kind: 'number', value: 255, min: 0, max: 255, step: 1, decimals: 0 },
+      { key: 'gamma', label: 'Gamma', kind: 'number', value: 1, min: 0.1, max: 10, step: 0.01, decimals: 2 },
+      { key: 'outBlack', label: 'Output Black', kind: 'number', value: 0, min: 0, max: 255, step: 1, decimals: 0 },
+      { key: 'outWhite', label: 'Output White', kind: 'number', value: 255, min: 0, max: 255, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'threshold',
+    name: 'Threshold',
+    category: 'Color Correction',
+    params: [{ key: 'level', label: 'Level', kind: 'number', value: 128, min: 0, max: 255, step: 1, decimals: 0 }],
+  },
+  {
+    type: 'posterize',
+    name: 'Posterize',
+    category: 'Stylize',
+    params: [{ key: 'levels', label: 'Level', kind: 'number', value: 6, min: 2, max: 32, step: 1, decimals: 0 }],
+  },
+  {
+    type: 'vignette',
+    name: 'Vignette',
+    category: 'Stylize',
+    params: [
+      { key: 'amount', label: 'Darkness', kind: 'number', value: 70, unit: '%', min: 0, max: 100, step: 1, decimals: 0 },
+      { key: 'size', label: 'Size', kind: 'number', value: 70, unit: '%', min: 5, max: 200, step: 1, decimals: 0 },
+      { key: 'feather', label: 'Feather', kind: 'number', value: 70, unit: '%', min: 1, max: 100, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'checkerboard',
+    name: 'Checkerboard',
+    category: 'Generate',
+    params: [
+      { key: 'size', label: 'Size', kind: 'number', value: 80, min: 2, max: 2000, step: 1, decimals: 0 },
+      { key: 'colorA', label: 'Color A', kind: 'color', value: [255, 255, 255] },
+      { key: 'colorB', label: 'Color B', kind: 'color', value: [0, 0, 0] },
+      { key: 'opacity', label: 'Opacity', kind: 'number', value: 100, unit: '%', min: 0, max: 100, step: 1, decimals: 0 },
+    ],
+  },
+  {
+    type: 'fractalNoise',
+    name: 'Fractal Noise',
+    category: 'Noise & Grain',
+    params: [
+      { key: 'contrast', label: 'Contrast', kind: 'number', value: 100, min: 0, max: 400, step: 1, decimals: 0 },
+      { key: 'brightness', label: 'Brightness', kind: 'number', value: 0, min: -100, max: 100, step: 1, decimals: 0 },
+      { key: 'scale', label: 'Scale', kind: 'number', value: 240, min: 5, max: 4000, step: 1, decimals: 0 },
+      { key: 'complexity', label: 'Complexity', kind: 'number', value: 4, min: 1, max: 8, step: 1, decimals: 0 },
+      { key: 'evolution', label: 'Evolution', kind: 'number', value: 0, unit: '°', step: 1, decimals: 0 },
+    ],
+  },
 ];
 
 export function getEffectDef(type: string): EffectDef | undefined {

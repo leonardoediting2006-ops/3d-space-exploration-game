@@ -14,17 +14,19 @@ import {
 import { uid } from '../core/ids';
 import { baseValue, evalProp, setAnimated, setKeyAt, sortKeys } from '../core/interp';
 import { clamp } from '../core/math';
-import { cloneLayer, layerProps, PRESETS, resolveProp, shiftLayer } from '../core/props';
+import { cloneLayer, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
 import { snapToFrame } from '../core/time';
 import type {
   BlendMode,
   Comp,
   Ease,
+  Keyframe,
   Layer,
   LayerData,
   MatteMode,
   Project,
+  Prop,
   PropGroup,
   PropValue,
   RGB,
@@ -783,4 +785,245 @@ export function setManyProps(updates: PropUpdate[], at = now()): void {
       else prop.value = Array.isArray(u.value) ? [...u.value] : u.value;
     }
   });
+}
+
+/* ------------------------------------------------------------------ clipboard */
+
+interface ClipKeys {
+  kind: 'keys';
+  items: { path: string; valueKind: Prop['kind']; keys: { dt: number; v: PropValue; ease: Ease }[] }[];
+}
+interface ClipLayers {
+  kind: 'layers';
+  layers: Layer[];
+}
+let clipboard: ClipKeys | ClipLayers | null = null;
+
+export const hasClipboard = (): boolean => clipboard !== null;
+
+/** Ctrl+C: selected keyframes if any, otherwise selected layers. */
+export function copySelection(): boolean {
+  const s = S();
+  const comp = activeComp(s);
+  if (s.selKeys.length) {
+    const sel = new Set(s.selKeys);
+    const raw: { path: string; valueKind: Prop['kind']; keys: Keyframe[] }[] = [];
+    let t0 = Infinity;
+    for (const l of comp.layers) {
+      for (const { group, key, prop } of layerPropEntries(l)) {
+        const ks = prop.keys.filter((k) => sel.has(k.id));
+        if (!ks.length) continue;
+        raw.push({ path: `${group}/${key}`, valueKind: prop.kind, keys: ks });
+        t0 = Math.min(t0, ks[0].t);
+      }
+    }
+    clipboard = {
+      kind: 'keys',
+      items: raw.map((r) => ({
+        path: r.path,
+        valueKind: r.valueKind,
+        keys: r.keys.map((k) => ({ dt: k.t - t0, v: structuredClone(k.v), ease: structuredClone(k.ease) })),
+      })),
+    };
+    toast(`Copied ${s.selKeys.length} keyframe${s.selKeys.length === 1 ? '' : 's'}`);
+    return true;
+  }
+  if (s.selection.length) {
+    clipboard = { kind: 'layers', layers: comp.layers.filter((l) => s.selection.includes(l.id)).map((l) => structuredClone(l)) };
+    toast(`Copied ${clipboard.layers.length} layer${clipboard.layers.length === 1 ? '' : 's'}`);
+    return true;
+  }
+  return false;
+}
+
+export function cutSelection(): void {
+  const s = S();
+  if (!copySelection()) return;
+  if (s.selKeys.length) deleteKeys(s.selKeys);
+  else deleteLayers(s.selection);
+}
+
+/** Ctrl+V: layers land at the playhead; keyframes paste onto the selected layer's matching properties. */
+export function pasteClipboard(): void {
+  const s = S();
+  const comp = activeComp(s);
+  const t = now();
+  if (!clipboard) return void toast('Nothing to paste — copy layers or keyframes first.');
+  if (clipboard.kind === 'layers') {
+    const source = clipboard.layers;
+    const created: string[] = [];
+    commit((p) => {
+      const c = p.comps[comp.id];
+      const idMap = new Map<string, string>();
+      const copies = source.map((l) => {
+        const copy = cloneLayer(l);
+        idMap.set(l.id, copy.id);
+        return copy;
+      });
+      const dt = snapToFrame(t - Math.min(...source.map((l) => l.inPoint)), comp.fps);
+      for (const copy of copies) {
+        copy.parentId = copy.parentId && idMap.has(copy.parentId) ? idMap.get(copy.parentId)! : null;
+        shiftLayer(copy, dt);
+      }
+      const idx = s.selection.map((id) => c.layers.findIndex((l) => l.id === id)).filter((i) => i >= 0).reduce((m, i) => Math.min(m, i), 0);
+      c.layers.splice(idx, 0, ...copies);
+      created.push(...copies.map((x) => x.id));
+    });
+    appStore.set({ selection: created, selKeys: [] });
+    return;
+  }
+  const target = comp.layers.find((l) => l.id === s.selection[0]);
+  if (!target) return void toast('Select a layer to paste keyframes onto.');
+  const items = clipboard.items;
+  let pasted = 0;
+  const newIds: string[] = [];
+  commit((p) => {
+    const layer = p.comps[comp.id].layers.find((l) => l.id === target.id)!;
+    for (const item of items) {
+      const [group, key] = [item.path.slice(0, item.path.indexOf('/')), item.path.slice(item.path.indexOf('/') + 1)];
+      const prop = resolveProp(layer, group as PropGroup, key);
+      if (!prop || prop.kind !== item.valueKind) continue;
+      for (const k of item.keys) {
+        const nk = setKeyAt(prop, snapToFrame(t + k.dt, comp.fps), k.v, keyTol(comp), k.ease);
+        nk.ease = structuredClone(k.ease);
+        newIds.push(nk.id);
+        pasted++;
+      }
+    }
+  });
+  if (!pasted) toast('The selected layer has no matching properties for those keyframes.');
+  else appStore.set({ selKeys: newIds });
+}
+
+/* ------------------------------------------------------------------ more layer operations */
+
+/** Ctrl+Shift+D: cut each selected layer in two at the playhead. */
+export function splitLayers(ids: string[], at = now()): void {
+  const comp = activeComp();
+  const created: string[] = [];
+  commit((p) => {
+    const c = p.comps[comp.id];
+    for (const id of ids) {
+      const i = c.layers.findIndex((l) => l.id === id);
+      const l = c.layers[i];
+      if (!l || !(at > l.inPoint + 1e-6 && at < l.outPoint - 1e-6)) continue;
+      const copy = cloneLayer(l);
+      copy.name = /\s\d+$/.test(l.name) ? l.name.replace(/\d+$/, (n) => String(Number(n) + 1)) : `${l.name} 2`;
+      copy.inPoint = at;
+      l.outPoint = at;
+      c.layers.splice(i, 0, copy);
+      created.push(copy.id);
+    }
+  });
+  if (created.length) appStore.set({ selection: created, selKeys: [] });
+  else toast('Move the playhead inside a selected layer to split it.');
+}
+
+/** Lay selected layers end to end, in the order they were selected. */
+export function sequenceLayers(ids: string[]): void {
+  if (ids.length < 2) return void toast('Select two or more layers to sequence.');
+  const comp = activeComp();
+  commit((p) => {
+    const c = p.comps[comp.id];
+    let cursor: number | null = null;
+    for (const id of ids) {
+      const l = c.layers.find((x) => x.id === id);
+      if (!l) continue;
+      if (cursor !== null) shiftLayer(l, cursor - l.inPoint);
+      cursor = l.outPoint;
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ keyframe interpolation */
+
+export type EaseMode = 'both' | 'in' | 'out' | 'linear' | 'hold';
+
+type Bez = [number, number, number, number];
+const asBezier = (e: Ease): Bez | null => (e === 'hold' ? null : e === 'linear' ? [1 / 3, 1 / 3, 2 / 3, 2 / 3] : [e[0], e[1], e[2], e[3]]);
+
+/**
+ * AE-style keyframe assistant. A keyframe's "out" influence lives on the segment leaving it and its
+ * "in" influence on the segment arriving, so Easy Ease touches both neighbouring segments.
+ */
+export function applyKeyEase(ids: string[], mode: EaseMode): void {
+  if (!ids.length) return;
+  const sel = new Set(ids);
+  const compId = S().activeCompId;
+  commit((p) => {
+    for (const l of p.comps[compId].layers) {
+      for (const prop of layerProps(l)) {
+        const ks = prop.keys;
+        ks.forEach((k, i) => {
+          if (!sel.has(k.id)) return;
+          const leaving = i < ks.length - 1;
+          const arriving = i > 0;
+          if (mode === 'linear') {
+            if (leaving) k.ease = 'linear';
+            if (arriving && ks[i - 1].ease !== 'hold') ks[i - 1].ease = 'linear';
+          } else if (mode === 'hold') {
+            if (leaving) k.ease = 'hold';
+          } else {
+            if (leaving && (mode === 'both' || mode === 'out')) {
+              const b = asBezier(k.ease);
+              if (b) {
+                b[0] = 0.33;
+                b[1] = 0;
+                k.ease = b;
+              }
+            }
+            if (arriving && (mode === 'both' || mode === 'in')) {
+              const b = asBezier(ks[i - 1].ease);
+              if (b) {
+                b[2] = 0.67;
+                b[3] = 1;
+                ks[i - 1].ease = b;
+              }
+            }
+          }
+        });
+      }
+    }
+  });
+}
+
+/** Set one keyframe's outgoing bezier (used by the easing editor). */
+export function setKeyBezier(id: string, b: Bez): void {
+  setKeysEase([id], b);
+}
+
+export function timeReverseKeys(ids: string[]): void {
+  const sel = new Set(ids);
+  const compId = S().activeCompId;
+  commit((p) => {
+    for (const l of p.comps[compId].layers) {
+      for (const prop of layerProps(l)) {
+        const picked = prop.keys.filter((k) => sel.has(k.id));
+        if (picked.length < 2) continue;
+        const t0 = picked[0].t;
+        const t1 = picked[picked.length - 1].t;
+        const snapshot = picked.map((k) => ({ t: k.t, v: k.v, ease: k.ease }));
+        const m = picked.length;
+        picked.forEach((k, j) => {
+          const src = snapshot[m - 1 - j];
+          k.t = t0 + t1 - src.t;
+          k.v = src.v;
+          const seg = snapshot[m - 2 - j]?.ease;
+          if (seg === undefined) k.ease = 'linear';
+          else if (seg === 'hold' || seg === 'linear') k.ease = seg;
+          else k.ease = [1 - seg[2], 1 - seg[3], 1 - seg[0], 1 - seg[1]];
+        });
+        sortKeys(prop);
+      }
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ anchor point (pan behind) */
+
+export function setAnchorKeepingPlace(layerId: string, anchor: Vec2, position: Vec2): void {
+  setManyProps([
+    { layerId, group: 'transform', key: 'anchor', value: anchor },
+    { layerId, group: 'transform', key: 'position', value: position },
+  ]);
 }

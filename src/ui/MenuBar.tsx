@@ -4,18 +4,25 @@ import {
   addNull,
   addShape,
   addText,
+  applyKeyEase,
   closeDialog,
+  copySelection,
+  cutSelection,
   deleteLayers,
   duplicateLayers,
   newProject,
   openDialog,
   openProjectText,
+  pasteClipboard,
   precompose,
   saveProjectFile,
   selectAllLayers,
   setTime,
+  sequenceLayers,
   setWorkArea,
+  splitLayers,
   stackMove,
+  timeReverseKeys,
 } from '../state/actions';
 import { activeComp, appStore, redo, timeStore, toast, undo, useApp } from '../state/store';
 
@@ -37,6 +44,7 @@ export function MenuBar() {
   const undoCount = useApp((s) => s.undoCount);
   const redoCount = useApp((s) => s.redoCount);
   const selection = useApp((s) => s.selection);
+  const selKeys = useApp((s) => s.selKeys);
   const fileName = useApp((s) => s.fileName);
   const dirty = useApp((s) => s.dirty);
   const checker = useApp((s) => s.checkerboard);
@@ -78,6 +86,10 @@ export function MenuBar() {
       { label: 'Undo', shortcut: 'Ctrl+Z', run: undo, disabled: undoCount === 0 },
       { label: 'Redo', shortcut: 'Ctrl+Shift+Z', run: redo, disabled: redoCount === 0 },
       { sep: true },
+      { label: 'Cut', shortcut: 'Ctrl+X', run: cutSelection },
+      { label: 'Copy', shortcut: 'Ctrl+C', run: () => void copySelection() },
+      { label: 'Paste', shortcut: 'Ctrl+V', run: pasteClipboard },
+      { sep: true },
       { label: 'Duplicate', shortcut: 'Ctrl+D', run: () => duplicateLayers(selection), disabled: !hasSel },
       { label: 'Delete', shortcut: 'Del', run: () => deleteLayers(selection), disabled: !hasSel },
       { label: 'Select All', shortcut: 'Ctrl+A', run: selectAllLayers },
@@ -98,12 +110,23 @@ export function MenuBar() {
       { label: 'New Null Object', run: addNull },
       { label: 'New Adjustment Layer', run: addAdjustment },
       { sep: true },
+      { label: 'Split Layer', shortcut: 'Ctrl+Shift+D', run: () => splitLayers(selection), disabled: !hasSel },
       { label: 'Pre-compose…', shortcut: 'Ctrl+Shift+C', run: () => precompose(selection), disabled: !hasSel },
       { sep: true },
       { label: 'Bring Layer to Front', shortcut: 'Ctrl+Shift+]', run: () => stackMove(selection, 'top'), disabled: !hasSel },
       { label: 'Bring Layer Forward', shortcut: 'Ctrl+]', run: () => stackMove(selection, 'up'), disabled: !hasSel },
       { label: 'Send Layer Backward', shortcut: 'Ctrl+[', run: () => stackMove(selection, 'down'), disabled: !hasSel },
       { label: 'Send Layer to Back', shortcut: 'Ctrl+Shift+[', run: () => stackMove(selection, 'bottom'), disabled: !hasSel },
+    ],
+    Animation: [
+      { label: 'Easy Ease', shortcut: 'F9', run: () => applyKeyEase(selKeys, 'both'), disabled: !selKeys.length },
+      { label: 'Easy Ease In', shortcut: 'Shift+F9', run: () => applyKeyEase(selKeys, 'in'), disabled: !selKeys.length },
+      { label: 'Easy Ease Out', shortcut: 'Ctrl+Shift+F9', run: () => applyKeyEase(selKeys, 'out'), disabled: !selKeys.length },
+      { label: 'Linear Keyframes', run: () => applyKeyEase(selKeys, 'linear'), disabled: !selKeys.length },
+      { label: 'Hold Keyframes', run: () => applyKeyEase(selKeys, 'hold'), disabled: !selKeys.length },
+      { sep: true },
+      { label: 'Time-Reverse Keyframes', run: () => timeReverseKeys(selKeys), disabled: selKeys.length < 2 },
+      { label: 'Sequence Layers', run: () => sequenceLayers(selection), disabled: selection.length < 2 },
     ],
     View: [
       { label: 'Fit in Window', run: () => appStore.set({ zoom: 'fit', panX: 0, panY: 0 }) },

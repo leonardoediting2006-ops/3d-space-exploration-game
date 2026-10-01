@@ -33,7 +33,7 @@ export function useStore<T extends object, S>(store: Store<T>, selector: (s: T) 
   return useSyncExternalStore(store.subscribe, () => selector(store.get()));
 }
 
-export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text';
+export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text' | 'anchor';
 export type RightTab = 'effects' | 'controls' | 'layer';
 export type Quality = 'auto' | 1 | 0.5 | 0.33 | 0.25;
 
@@ -62,6 +62,7 @@ export interface AppState {
   showOnly: Record<string, string[] | 'animated'>;
   pps: number;
   tlHeight: number;
+  snap: boolean;
 
   playing: boolean;
   loopPlayback: boolean;
@@ -97,6 +98,7 @@ export const appStore = createStore<AppState>({
   showOnly: {},
   pps: 90,
   tlHeight: 330,
+  snap: true,
   playing: false,
   loopPlayback: true,
   zoom: 'fit',
