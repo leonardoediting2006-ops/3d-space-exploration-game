@@ -12,6 +12,7 @@ import {
   openDialog,
   pasteClipboard,
   precompose,
+  removePathVertex,
   revealProps,
   saveProjectFile,
   selectAllLayers,
@@ -25,7 +26,8 @@ import {
 } from '../state/actions';
 import { activeComp, appStore, redo, timeStore, undo } from '../state/store';
 import { OPEN_PROJECT_EVENT } from './MenuBar';
-import { setSpaceHeld } from './Viewer';
+import { editTarget } from './pathEdit';
+import { isPenActive, setSpaceHeld } from './Viewer';
 
 const REVEAL: Record<string, string> = {
   p: 'transform.position',
@@ -51,6 +53,8 @@ export function installShortcuts(): () => void {
     const t = timeStore.get().t;
     const sel = s.selection;
     const prevent = () => e.preventDefault();
+    // while drawing with the pen, Enter / Esc / Backspace belong to the pen
+    if (isPenActive() && (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace')) return;
 
     if (mod) {
       if (key === 'z') {
@@ -165,11 +169,14 @@ export function installShortcuts(): () => void {
         if (s.selection.length || s.selKeys.length) appStore.set({ selection: [], selKeys: [] });
         return;
       case 'Delete':
-      case 'Backspace':
+      case 'Backspace': {
         prevent();
-        if (s.selKeys.length) deleteKeys(s.selKeys);
+        const target = s.selVertex !== null ? editTarget(comp, sel, s.activeMask) : null;
+        if (target && s.selVertex !== null) removePathVertex(target.layer.id, target.group, target.key, s.selVertex);
+        else if (s.selKeys.length) deleteKeys(s.selKeys);
         else if (sel.length) deleteLayers(sel);
         return;
+      }
       case 'ArrowLeft':
       case 'ArrowRight':
       case 'ArrowUp':
@@ -194,6 +201,7 @@ export function installShortcuts(): () => void {
     if (key === 'z') return appStore.set({ tool: 'zoom' });
     if (key === 'q') return appStore.set({ tool: 'shape' });
     if (key === 'y') return appStore.set({ tool: 'anchor' });
+    if (key === 'g') return appStore.set({ tool: 'pen' });
   };
 
   const up = (e: KeyboardEvent) => {

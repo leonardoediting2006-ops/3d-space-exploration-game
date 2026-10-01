@@ -1,8 +1,9 @@
-import { cssColor, evalNum } from '../core/interp';
-import { apply, mul, scaling, type Mat } from '../core/math';
+import { cssColor, evalNum, evalProp } from '../core/interp';
+import { apply, clamp, mul, scaling, type Mat } from '../core/math';
+import { pathToPath2D, pointCount } from '../core/path';
 import { BLEND_MODES, type Comp, type Effect, type Layer, type MatteMode, type Project } from '../core/types';
 import { Accumulator } from './accumulate';
-import { applyEffects, effectPadding } from './effects';
+import { applyEffects, effectPadding, filterPass } from './effects';
 import { contentPad, layerMap, localBounds, rectCorners, worldMatrix, type Rect } from './geometry';
 import { isSingleDraw, paintContent } from './painters';
 import { acquire, release, resetCtx } from './pool';
@@ -136,11 +137,96 @@ function renderMotionBlurred(f: Frame, l: Layer, surf: HTMLCanvasElement, rect: 
   acc.writeTo(surf);
 }
 
+
+const activeMasks = (l: Layer) => l.masks.filter((m) => m.mode !== 'none');
+
+/**
+ * Cut the layer's pixels by its masks, in stack order: the first mask seeds the matte, later ones
+ * add to it, subtract from it or intersect with it. Runs before effects, like in AE.
+ */
+function applyMasks(f: Frame, surf: HTMLCanvasElement, l: Layer, rect: Rect): void {
+  const masks = activeMasks(l);
+  if (!masks.length) return;
+  const t = f.time;
+  const m = layerMatrix(f, l, t);
+  const acc = acquire(f.w, f.h);
+  const actx = acc.getContext('2d')!;
+  const blit = (ctx: CanvasRenderingContext2D, src: HTMLCanvasElement) => ctx.drawImage(src, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+
+  masks.forEach((mask, i) => {
+    const v = evalProp(mask.props.path, t) as number[];
+    let shape = acquire(f.w, f.h);
+    const sctx = shape.getContext('2d')!;
+    if (pointCount(v) >= 2) {
+      sctx.save();
+      setM(sctx, m);
+      const path = pathToPath2D(v, true);
+      sctx.fillStyle = '#fff';
+      sctx.fill(path);
+      const expansion = evalNum(mask.props.expansion, t);
+      if (expansion !== 0) {
+        sctx.globalCompositeOperation = expansion > 0 ? 'source-over' : 'destination-out';
+        sctx.strokeStyle = '#fff';
+        sctx.lineJoin = 'round';
+        sctx.lineWidth = Math.abs(expansion) * 2;
+        sctx.stroke(path);
+      }
+      sctx.restore();
+    }
+    const feather = evalNum(mask.props.feather, t) * f.s;
+    if (feather > 0.05) {
+      const grow = Math.ceil(feather * 1.5) + 2;
+      const er: Rect = {
+        x: Math.max(0, rect.x - grow),
+        y: Math.max(0, rect.y - grow),
+        w: 0,
+        h: 0,
+      };
+      er.w = Math.min(f.w, rect.x + rect.w + grow) - er.x;
+      er.h = Math.min(f.h, rect.y + rect.h + grow) - er.y;
+      shape = filterPass(shape, `blur(${feather * 0.5}px)`, er);
+    }
+    if (mask.inverted) {
+      const inv = acquire(f.w, f.h);
+      const ictx = inv.getContext('2d')!;
+      ictx.fillStyle = '#fff';
+      ictx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ictx.globalCompositeOperation = 'destination-out';
+      blit(ictx, shape);
+      release(shape);
+      shape = inv;
+    }
+    const opacity = clamp(evalNum(mask.props.opacity, t) / 100, 0, 1);
+    actx.save();
+    actx.globalAlpha = opacity;
+    if (i === 0) {
+      if (mask.mode === 'subtract') {
+        actx.globalAlpha = 1;
+        actx.fillStyle = '#fff';
+        actx.fillRect(rect.x, rect.y, rect.w, rect.h);
+        actx.globalAlpha = opacity;
+        actx.globalCompositeOperation = 'destination-out';
+      }
+    } else if (mask.mode === 'subtract') actx.globalCompositeOperation = 'destination-out';
+    else if (mask.mode === 'intersect') actx.globalCompositeOperation = 'destination-in';
+    blit(actx, shape);
+    actx.restore();
+    release(shape);
+  });
+
+  const sctx = surf.getContext('2d')!;
+  sctx.globalCompositeOperation = 'destination-in';
+  blit(sctx, acc);
+  sctx.globalCompositeOperation = 'source-over';
+  release(acc);
+}
+
 /** Layer content + its effect stack on a transparent, comp-sized surface (no opacity/blend yet). */
 function renderLayerSurface(f: Frame, l: Layer, effects: Effect[], rect: Rect, times: number[]): HTMLCanvasElement {
   let surf = acquire(f.w, f.h);
   if (times.length > 1) renderMotionBlurred(f, l, surf, rect, times);
   else paintLayer(f, surf.getContext('2d')!, l, f.time);
+  applyMasks(f, surf, l, rect);
   if (effects.length) surf = applyEffects(surf, effects, { scale: f.s, time: f.time, fps: f.comp.fps, rect });
   return surf;
 }
@@ -206,7 +292,7 @@ function drawLayer(f: Frame, ctx: CanvasRenderingContext2D, layers: Layer[], i: 
   const rect = layerRect(f, l, effects, times);
   if (!rect) return; // entirely off-screen
   const matteLayer = l.matte !== 'none' && i > 0 ? layers[i - 1] : null;
-  const simple = effects.length === 0 && !matteLayer && times.length === 1 && (opacity >= 0.999 || isSingleDraw(l));
+  const simple = effects.length === 0 && !matteLayer && times.length === 1 && activeMasks(l).length === 0 && (opacity >= 0.999 || isSingleDraw(l));
 
   if (simple) {
     ctx.save();

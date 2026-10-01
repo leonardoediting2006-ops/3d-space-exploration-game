@@ -37,13 +37,17 @@ function checkValue(kind: Prop['kind'], v: unknown, what: string): void {
     if (!isNum(v)) fail(`${what} must be a number`);
     return;
   }
+  if (kind === 'path') {
+    if (!Array.isArray(v) || v.length % 6 !== 0 || v.length > 6 * 5000 || !v.every(isNum)) fail(`${what} must be a list of path vertices`);
+    return;
+  }
   const n = kind === 'vec2' ? 2 : 3;
   if (!Array.isArray(v) || v.length !== n || !v.every(isNum)) fail(`${what} must be ${n} numbers`);
 }
 
 function checkProp(p: unknown, what: string): Prop {
   if (!isObj(p)) return fail(`${what} is not an object`);
-  if (p.kind !== 'number' && p.kind !== 'vec2' && p.kind !== 'color') fail(`${what} has an unknown kind`);
+  if (p.kind !== 'number' && p.kind !== 'vec2' && p.kind !== 'color' && p.kind !== 'path') fail(`${what} has an unknown kind`);
   const kind = p.kind as Prop['kind'];
   str(p.label, `${what}.label`);
   checkValue(kind, p.value, `${what}.value`);
@@ -90,6 +94,15 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
     if (!isObj(fx.props)) fail(`${what} effect props`);
     for (const [k, p] of Object.entries(fx.props as Record<string, unknown>)) checkProp(p, `${what} effect ${k}`);
   }
+  if (l.masks !== undefined) {
+    if (!Array.isArray(l.masks) || l.masks.length > 200) fail(`${what}.masks`);
+    for (const m of l.masks as unknown[]) {
+      if (!isObj(m) || typeof m.id !== 'string' || typeof m.name !== 'string' || typeof m.inverted !== 'boolean') return fail(`${what} has a bad mask`);
+      if (!['none', 'add', 'subtract', 'intersect'].includes(String(m.mode))) fail(`${what} mask mode`);
+      if (!isObj(m.props)) return fail(`${what} mask props`);
+      for (const k of ['path', 'feather', 'opacity', 'expansion']) checkProp((m.props as Record<string, unknown>)[k], `${what} mask ${k}`);
+    }
+  }
   if (!isObj(l.data)) return fail(`${what}.data`);
   const d = l.data;
   switch (l.type) {
@@ -101,7 +114,8 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
       if (d.type !== l.type) fail(`${what}.data.type`);
       break;
     case 'shape':
-      if (!['rect', 'ellipse', 'polygon', 'star'].includes(String(d.shape))) fail(`${what} shape`);
+      if (!['rect', 'ellipse', 'polygon', 'star', 'path'].includes(String(d.shape))) fail(`${what} shape`);
+      if (d.shape === 'path' && !(isObj(l.content) && 'path' in (l.content as object))) fail(`${what} is a path shape without a path`);
       break;
     case 'text':
       str(d.text, `${what} text`);
@@ -184,6 +198,8 @@ function repairProject(project: Project): void {
     for (const l of comp.layers) {
       const fresh = makeTransform();
       for (const k of TRANSFORM_KEYS) l.transform[k] = { ...fresh[k], ...l.transform[k] };
+      l.masks ??= [];
+      if (l.data.type === 'shape') l.data.closed ??= true;
     }
   }
 }

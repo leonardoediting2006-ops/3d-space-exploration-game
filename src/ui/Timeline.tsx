@@ -4,12 +4,14 @@ import { snapToFrame, timecode, parseTimecode } from '../core/time';
 import {
   BLEND_MODES,
   LABEL_COLORS,
+  MASK_MODES,
   MATTE_MODES,
   TRANSFORM_KEYS,
   type BlendMode,
   type Comp,
   type Keyframe,
   type Layer,
+  type MaskMode,
   type MatteMode,
   type Prop,
   type PropGroup,
@@ -21,12 +23,14 @@ import {
   moveLayerToIndex,
   moveLayersInTime,
   removeEffect,
+  removeMask,
   selectKeys,
   selectLayers,
   setEffectEnabled,
   setExpanded,
   setLayerField,
   setLoop,
+  setMaskField,
   setParent,
   setTime,
   setWiggle,
@@ -49,7 +53,7 @@ const ROW_PROP = 24;
 
 type Row =
   | { kind: 'layer'; id: string; layer: Layer; index: number }
-  | { kind: 'group'; id: string; layer: Layer; label: string; depth: number; open: boolean; fxId?: string }
+  | { kind: 'group'; id: string; layer: Layer; label: string; depth: number; open: boolean; fxId?: string; maskId?: string }
   | { kind: 'prop'; id: string; layer: Layer; group: PropGroup; propKey: string; prop: Prop; depth: number };
 
 const rowHeight = (r: Row) => (r.kind === 'layer' ? ROW_LAYER : ROW_PROP);
@@ -63,6 +67,7 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
     for (const k of TRANSFORM_KEYS) all.push({ group: 'transform', key: k, prop: layer.transform[k], path: `transform.${k}` });
     for (const [k, p] of Object.entries(layer.content)) all.push({ group: 'content', key: k, prop: p, path: `content.${k}` });
     for (const fx of layer.effects) for (const [k, p] of Object.entries(fx.props)) all.push({ group: `fx:${fx.id}`, key: k, prop: p, path: `fx.${fx.id}.${k}` });
+    for (const m of layer.masks) for (const [k, p] of Object.entries(m.props)) all.push({ group: `mask:${m.id}`, key: k, prop: p, path: `mask.${m.id}.${k}` });
 
     if (filter) {
       for (const a of all) {
@@ -95,6 +100,19 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
           const fOpen = expanded[fId] ?? true;
           rows.push({ kind: 'group', id: fId, layer, label: getEffectDef(fx.type)?.name ?? fx.type, depth: 2, open: fOpen, fxId: fx.id });
           if (fOpen) for (const [k, p] of Object.entries(fx.props)) rows.push({ kind: 'prop', id: `${layer.id}:fx.${fx.id}.${k}`, layer, group: `fx:${fx.id}`, propKey: k, prop: p, depth: 3 });
+        }
+      }
+    }
+    if (layer.masks.length) {
+      const mId = `${layer.id}:masks`;
+      const mOpen = expanded[mId] ?? true;
+      rows.push({ kind: 'group', id: mId, layer, label: 'Masks', depth: 1, open: mOpen });
+      if (mOpen) {
+        for (const m of layer.masks) {
+          const gId = `${layer.id}:mask:${m.id}`;
+          const gOpen = expanded[gId] ?? true;
+          rows.push({ kind: 'group', id: gId, layer, label: m.name, depth: 2, open: gOpen, maskId: m.id });
+          if (gOpen) for (const [k, p] of Object.entries(m.props)) rows.push({ kind: 'prop', id: `${layer.id}:mask.${m.id}.${k}`, layer, group: `mask:${m.id}`, propKey: k, prop: p, depth: 3 });
         }
       }
     }
@@ -253,7 +271,7 @@ export function Timeline() {
   const propMenu = (e: React.MouseEvent, row: Extract<Row, { kind: 'prop' }>) => {
     const { layer, group, propKey, prop } = row;
     const items: MenuItem[] = [];
-    if (prop.kind !== 'color' && !prop.options) {
+    if (prop.kind !== 'color' && prop.kind !== 'path' && !prop.options) {
       items.push(
         prop.wiggle
           ? { label: 'Remove Wiggle', onClick: () => setWiggle(layer.id, group, propKey, null) }
@@ -641,8 +659,10 @@ function typeGlyph(t: Layer['type']): string {
 }
 
 function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
-  const { layer, fxId } = row;
+  const { layer, fxId, maskId } = row;
   const fx = fxId ? layer.effects.find((e) => e.id === fxId) : undefined;
+  const mask = maskId ? layer.masks.find((m) => m.id === maskId) : undefined;
+  const activeMask = useApp((s) => s.activeMask);
   return (
     <div className="group-left" style={{ paddingLeft: 40 + row.depth * 16 }}>
       <button className={`twirl ${row.open ? 'open' : ''}`} onClick={() => setExpanded(row.id, !row.open)}>
@@ -653,7 +673,30 @@ function GroupLeft({ row }: { row: Extract<Row, { kind: 'group' }> }) {
           fx
         </button>
       )}
-      <span className="glabel">{row.label}</span>
+      <span
+        className={`glabel ${mask && activeMask === mask.id ? 'active-mask' : ''}`}
+        onClick={() => mask && appStore.set({ activeMask: mask.id, selVertex: null, selection: [layer.id] })}
+        title={mask ? 'Click to edit this mask in the viewer' : undefined}
+      >
+        {row.label}
+      </span>
+      {mask && (
+        <>
+          <select className="mini-select" value={mask.mode} onChange={(e) => setMaskField(layer.id, mask.id, { mode: e.target.value as MaskMode })} data-testid="mask-mode">
+            {MASK_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <label className="chk" title="Invert the mask">
+            <input type="checkbox" checked={mask.inverted} onChange={(e) => setMaskField(layer.id, mask.id, { inverted: e.target.checked })} data-testid="mask-invert" /> Inv
+          </label>
+          <button className="sw danger" title="Remove mask" onClick={() => removeMask(layer.id, mask.id)}>
+            ✕
+          </button>
+        </>
+      )}
       {fx && (
         <button className="sw danger" title="Remove effect" onClick={() => removeEffect(layer.id, fx.id)}>
           ✕

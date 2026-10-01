@@ -1295,3 +1295,25 @@ kbd {
   font-size: 10.5px;
   color: var(--dim);
 }
+
+.glabel.active-mask {
+  color: var(--key);
+}
+.path-readout {
+  color: var(--dim);
+  font-style: italic;
+}
+.group-left .mini-select {
+  margin-left: 6px;
+  width: 84px;
+}
+.group-left .chk {
+  margin-left: 4px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.mask-toggle {
+  margin: 0 4px;
+  color: var(--dim);
+}

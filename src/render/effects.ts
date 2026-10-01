@@ -40,7 +40,7 @@ export function effectPadding(effects: Effect[], scale: number, time: number): n
 type Canvas = HTMLCanvasElement;
 
 /** Draw src through a CSS filter into a fresh canvas; src is released. */
-function filterPass(src: Canvas, filter: string, r: Rect): Canvas {
+export function filterPass(src: Canvas, filter: string, r: Rect): Canvas {
   if (!FILTER_SUPPORTED) return src;
   const dst = acquire(src.width, src.height);
   const c = dst.getContext('2d')!;

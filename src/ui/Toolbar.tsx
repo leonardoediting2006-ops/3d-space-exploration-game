@@ -7,6 +7,7 @@ const TOOLS: { id: Tool; glyph: string; label: string }[] = [
   { id: 'hand', glyph: '✋', label: 'Hand (H, or hold Space)' },
   { id: 'zoom', glyph: '⌕', label: 'Zoom (Z) — Alt-click zooms out' },
   { id: 'shape', glyph: '▭', label: 'Shape (Q) — drag in the viewer. Shift = square, Alt = from center' },
+  { id: 'pen', glyph: '✒', label: 'Pen (G) — click to add vertices, drag for curves, click the first vertex to close. Enter finishes an open path, Esc cancels' },
   { id: 'text', glyph: 'T', label: 'Text — click in the viewer' },
   { id: 'anchor', glyph: '⊹', label: 'Anchor Point / Pan Behind (Y) — drag to move the anchor without moving the layer' },
 ];
@@ -21,6 +22,7 @@ const SHAPES: { id: ShapeKind; label: string }[] = [
 export function Toolbar() {
   const tool = useApp((s) => s.tool);
   const shapeTool = useApp((s) => s.shapeTool);
+  const toolMakesMask = useApp((s) => s.toolMakesMask);
   const project = useApp((s) => s.project);
   const openComps = useApp((s) => s.openComps);
   const activeCompId = useApp((s) => s.activeCompId);
@@ -32,6 +34,11 @@ export function Toolbar() {
             {t.glyph}
           </button>
         ))}
+        {(tool === 'shape' || tool === 'pen') && (
+          <label className="chk mask-toggle" title="Cut a mask on the selected layer instead of creating a new shape layer">
+            <input type="checkbox" checked={toolMakesMask} onChange={(e) => appStore.set({ toolMakesMask: e.target.checked })} data-testid="tool-makes-mask" /> Mask
+          </label>
+        )}
         {tool === 'shape' && (
           <select value={shapeTool} onChange={(e) => appStore.set({ shapeTool: e.target.value as ShapeKind })} title="Shape type" data-testid="shape-kind">
             {SHAPES.map((s) => (

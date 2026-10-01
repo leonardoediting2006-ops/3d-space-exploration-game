@@ -4,7 +4,7 @@
 export type Vec2 = [number, number];
 export type RGB = [number, number, number]; // 0..255
 export type PropValue = number | number[];
-export type PropKind = 'number' | 'vec2' | 'color';
+export type PropKind = 'number' | 'vec2' | 'color' | 'path';
 
 /** Interpolation leaving a keyframe: linear, hold, or a CSS-style cubic bezier. */
 export type Ease = 'linear' | 'hold' | [number, number, number, number];
@@ -95,7 +95,7 @@ export const MATTE_MODES: { id: MatteMode; label: string }[] = [
 
 export type LayerType = 'solid' | 'shape' | 'text' | 'image' | 'precomp' | 'null' | 'adjustment';
 
-export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'star';
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path';
 
 export type LayerData =
   | { type: 'solid'; width: number; height: number }
@@ -106,6 +106,8 @@ export type LayerData =
       shape: ShapeKind;
       fill: boolean;
       stroke: boolean;
+      /** Only meaningful for custom bezier paths. */
+      closed: boolean;
       lineCap: 'butt' | 'round' | 'square';
       lineJoin: 'miter' | 'round' | 'bevel';
     }
@@ -125,6 +127,23 @@ export interface Effect {
   id: string;
   type: string;
   enabled: boolean;
+  props: Record<string, Prop>;
+}
+
+export type MaskMode = 'none' | 'add' | 'subtract' | 'intersect';
+export const MASK_MODES: { id: MaskMode; label: string }[] = [
+  { id: 'add', label: 'Add' },
+  { id: 'subtract', label: 'Subtract' },
+  { id: 'intersect', label: 'Intersect' },
+  { id: 'none', label: 'None' },
+];
+
+export interface Mask {
+  id: string;
+  name: string;
+  mode: MaskMode;
+  inverted: boolean;
+  /** path, feather, opacity, expansion */
   props: Record<string, Prop>;
 }
 
@@ -148,6 +167,7 @@ export interface Layer {
   transform: Record<TransformKey, Prop>;
   content: Record<string, Prop>;
   effects: Effect[];
+  masks: Mask[];
   data: LayerData;
 }
 
@@ -185,7 +205,7 @@ export interface Project {
   counters: Record<string, number>;
 }
 
-export type PropGroup = 'transform' | 'content' | `fx:${string}`;
+export type PropGroup = 'transform' | 'content' | `fx:${string}` | `mask:${string}`;
 export interface PropRef {
   layerId: string;
   group: PropGroup;

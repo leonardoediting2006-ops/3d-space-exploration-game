@@ -1,4 +1,5 @@
-import { cssColor, evalColor, evalNum, evalVec } from '../core/interp';
+import { cssColor, evalColor, evalNum, evalProp, evalVec } from '../core/interp';
+import { pathLength, pathToPath2D, pointCount } from '../core/path';
 import { TAU } from '../core/math';
 import type { Layer, Project } from '../core/types';
 import { getAssetImage } from './assets';
@@ -32,6 +33,11 @@ function polyPath(pts: [number, number][]): ShapeGeometry {
 export function shapeGeometry(layer: Layer, t: number): ShapeGeometry | null {
   const d = layer.data;
   if (d.type !== 'shape') return null;
+  if (d.shape === 'path') {
+    const v = evalProp(layer.content.path, t) as number[];
+    if (pointCount(v) < 2) return null;
+    return { path: pathToPath2D(v, d.closed), length: pathLength(v, d.closed) };
+  }
   const [w, h] = evalVec(layer.content.size, t);
   const hw = Math.max(0, w) / 2;
   const hh = Math.max(0, h) / 2;
@@ -81,6 +87,8 @@ export function shapeGeometry(layer: Layer, t: number): ShapeGeometry | null {
       }
       return polyPath(pts);
     }
+    default:
+      return null;
   }
 }
 

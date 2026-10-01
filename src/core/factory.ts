@@ -1,8 +1,11 @@
 import { uid } from './ids';
+import { ellipsePath, pathBounds, rectPath, translatePath } from './path';
 import type {
   Comp,
   Layer,
   LayerData,
+  Mask,
+  MaskMode,
   LayerType,
   Project,
   Prop,
@@ -97,6 +100,7 @@ function baseLayer(type: LayerType, data: LayerData, o: BaseOpts, content: Recor
     transform: makeTransform(o.position ?? center, o.anchor ?? [0, 0]),
     content,
     effects: [],
+    masks: [],
     data,
   };
 }
@@ -152,6 +156,7 @@ export function createShape(
       shape: o.shape,
       fill: true,
       stroke: false,
+      closed: true,
       lineCap: 'round',
       lineJoin: 'round',
     },
@@ -199,4 +204,54 @@ export function intrinsicSize(layer: Layer): Vec2 | null {
 
 export function cloneDeep<T>(v: T): T {
   return structuredClone(v);
+}
+
+/** A freeform bezier shape layer. `path` is in comp coordinates; the layer origin moves to its centre. */
+export function createPathShape(
+  o: BaseOpts & { path: number[]; closed: boolean; fill?: RGB; stroke?: RGB; strokeWidth?: number },
+): Layer {
+  const b = pathBounds(o.path, o.closed);
+  const cx = b ? b.x + b.w / 2 : 0;
+  const cy = b ? b.y + b.h / 2 : 0;
+  const layer = createShape({
+    ...o,
+    shape: 'rect',
+    size: [1, 1],
+    position: [cx, cy],
+    fill: o.fill,
+    stroke: o.stroke,
+    strokeWidth: o.strokeWidth,
+  });
+  delete layer.content.size;
+  delete layer.content.roundness;
+  const content: Record<string, Prop> = { path: makeProp('path', 'Path', translatePath(o.path, -cx, -cy)) };
+  Object.assign(content, layer.content);
+  layer.content = content;
+  if (layer.data.type === 'shape') {
+    layer.data.shape = 'path';
+    layer.data.closed = o.closed;
+    layer.data.fill = o.closed;
+    layer.data.stroke = true;
+  }
+  return layer;
+}
+
+export function createMask(path: number[], name: string, mode: MaskMode = 'add'): Mask {
+  return {
+    id: uid('mask'),
+    name,
+    mode,
+    inverted: false,
+    props: {
+      path: makeProp('path', 'Mask Path', path),
+      feather: makeProp('number', 'Mask Feather', 0, { unit: 'px', min: 0, max: 1000, step: 0.5, decimals: 1 }),
+      opacity: makeProp('number', 'Mask Opacity', 100, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+      expansion: makeProp('number', 'Mask Expansion', 0, { unit: 'px', min: -1000, max: 1000, step: 0.5, decimals: 1 }),
+    },
+  };
+}
+
+/** A rectangular or elliptical starter mask that covers the layer's bounds. */
+export function starterMaskPath(kind: 'rect' | 'ellipse', x: number, y: number, w: number, h: number): number[] {
+  return kind === 'rect' ? rectPath(x, y, w, h) : ellipsePath(x + w / 2, y + h / 2, w / 2, h / 2);
 }

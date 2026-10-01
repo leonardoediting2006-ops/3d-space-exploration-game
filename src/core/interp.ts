@@ -100,6 +100,7 @@ export function baseValue(prop: Prop, t: number): PropValue {
 /** Full value of a property at comp time t, including wiggle and clamping. */
 export function evalProp(prop: Prop, t: number): PropValue {
   let v = baseValue(prop, t);
+  if (prop.kind === 'path') return v;
   if (prop.wiggle && prop.wiggle.amp !== 0) {
     const { freq, amp, seed } = prop.wiggle;
     const n = (axis: number) => (noise1(t * freq + seed * 17.3 + axis * 101.7) * 2 - 1) * amp;

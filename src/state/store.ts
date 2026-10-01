@@ -33,7 +33,7 @@ export function useStore<T extends object, S>(store: Store<T>, selector: (s: T) 
   return useSyncExternalStore(store.subscribe, () => selector(store.get()));
 }
 
-export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text' | 'anchor';
+export type Tool = 'select' | 'hand' | 'zoom' | 'shape' | 'text' | 'anchor' | 'pen';
 export type RightTab = 'effects' | 'controls' | 'layer';
 export type Quality = 'auto' | 1 | 0.5 | 0.33 | 0.25;
 
@@ -58,6 +58,10 @@ export interface AppState {
 
   tool: Tool;
   shapeTool: ShapeKind;
+  /** Shape and pen tools cut a mask on the selected layer instead of making a shape layer. */
+  toolMakesMask: boolean;
+  activeMask: string | null;
+  selVertex: number | null;
   expanded: Record<string, boolean>;
   showOnly: Record<string, string[] | 'animated'>;
   pps: number;
@@ -94,6 +98,9 @@ export const appStore = createStore<AppState>({
   selKeys: [],
   tool: 'select',
   shapeTool: 'rect',
+  toolMakesMask: false,
+  activeMask: null,
+  selVertex: null,
   expanded: {},
   showOnly: {},
   pps: 90,

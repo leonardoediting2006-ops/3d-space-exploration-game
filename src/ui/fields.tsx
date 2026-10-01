@@ -153,6 +153,7 @@ export function PropEditor({ layerId, group, propKey, prop }: PropEditorProps): 
       </select>
     );
   }
+  if (prop.kind === 'path') return <span className="path-readout">{Math.floor((v as number[]).length / 6)} vertices</span>;
   if (prop.kind === 'color') return <ColorField value={v as number[]} onChange={set} />;
   if (prop.kind === 'number') return <NumberField {...common} value={v as number} unit={prop.unit} onChange={set} />;
 

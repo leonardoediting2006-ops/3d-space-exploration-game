@@ -1,4 +1,5 @@
-import { evalNum, evalVec } from '../core/interp';
+import { evalNum, evalProp, evalVec } from '../core/interp';
+import { pathBounds, pathToPath2D, pointCount } from '../core/path';
 import { apply, invert, mul, rotation, scaling, translate, type Mat } from '../core/math';
 import type { Comp, Layer, Project, Vec2 } from '../core/types';
 
@@ -65,6 +66,10 @@ export function localBounds(project: Project, layer: Layer, t: number): Rect | n
     case 'null':
       return { x: 0, y: 0, w: d.width, h: d.height };
     case 'shape': {
+      if (d.shape === 'path') {
+        const b = pathBounds(evalProp(layer.content.path, t) as number[], d.closed);
+        return b ?? { x: -50, y: -50, w: 100, h: 100 };
+      }
       const s = evalVec(layer.content.size, t);
       return { x: -s[0] / 2, y: -s[1] / 2, w: s[0], h: s[1] };
     }
@@ -118,6 +123,15 @@ export function hitTestLayer(project: Project, layer: Layer, t: number, byId: Ma
   if (!inv) return false;
   const [x, y] = apply(inv, p);
   if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) return false;
+  if (layer.data.type === 'shape' && layer.data.shape === 'path') {
+    const v = evalProp(layer.content.path, t) as number[];
+    if (pointCount(v) < 2) return false;
+    const ctx = getMeasureCtx();
+    const path = pathToPath2D(v, layer.data.closed);
+    if (layer.data.fill && layer.data.closed && ctx.isPointInPath(path, x, y)) return true;
+    ctx.lineWidth = Math.max(evalNum(layer.content.strokeWidth, t), 12);
+    return ctx.isPointInStroke(path, x, y);
+  }
   if (layer.data.type === 'shape' && layer.data.shape === 'ellipse') {
     const rx = b.w / 2 || 1e-6;
     const ry = b.h / 2 || 1e-6;

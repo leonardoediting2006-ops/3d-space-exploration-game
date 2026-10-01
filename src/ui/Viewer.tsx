@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { baseValue } from '../core/interp';
+import { baseValue, evalProp } from '../core/interp';
 import { apply, applyVec, clamp, invert, radToDeg, type Mat } from '../core/math';
-import type { Comp, Layer, Project, Vec2 } from '../core/types';
+import { corner, ellipsePath, fromPoints, isSmooth, nearestOnPath, rectPath, smoothVertex, toPoints, type PathPt } from '../core/path';
+import type { Comp, Layer, Project, PropGroup, Vec2 } from '../core/types';
 import { renderComp } from '../render/renderer';
 import {
   hitTestLayer,
@@ -13,8 +14,11 @@ import {
   type Rect,
 } from '../render/geometry';
 import {
+  addMask,
+  addPathShape,
   addShape,
   addText,
+  insertPathVertex,
   deleteLayers,
   selectLayers,
   setAnchorKeepingPlace,
@@ -24,6 +28,7 @@ import {
   type PropUpdate,
 } from '../state/actions';
 import { activeComp, appStore, beginGesture, endGesture, timeStore, useActiveComp, useApp } from '../state/store';
+import { editTarget, type PathTarget } from './pathEdit';
 import { ViewerBar } from './ViewerBar';
 
 let spaceHeld = false;
@@ -73,6 +78,71 @@ function computeGizmo(project: Project, comp: Comp, layer: Layer, t: number, zoo
   return { poly, handles, rot: [top[0] + nx * off, top[1] + ny * off], anchor, localHandles: lh };
 }
 
+interface PathGizmo {
+  pts: PathPt[];
+  W: Mat;
+  closed: boolean;
+  /** Vertex and tangent-handle positions in composition space. */
+  world: { v: Vec2; i: Vec2; o: Vec2 }[];
+}
+
+function pathGizmo(target: PathTarget, comp: Comp, t: number): PathGizmo | null {
+  const pts = toPoints(evalProp(target.prop, t) as number[]);
+  if (!pts.length) return null;
+  const W = worldMatrix(target.layer, t, layerMap(comp));
+  return {
+    pts,
+    W,
+    closed: target.closed,
+    world: pts.map((p) => ({ v: apply(W, [p.x, p.y]), i: apply(W, [p.x + p.ix, p.y + p.iy]), o: apply(W, [p.x + p.ox, p.y + p.oy]) })),
+  };
+}
+
+const hasLen = (x: number, y: number) => Math.hypot(x, y) > 1e-6;
+
+function pathHit(gz: PathGizmo, selVertex: number | null, p: Vec2, r: number): { part: 'v' | 'in' | 'out'; index: number } | null {
+  const near = (a: Vec2) => Math.hypot(a[0] - p[0], a[1] - p[1]) <= r;
+  if (selVertex !== null && gz.pts[selVertex]) {
+    const pt = gz.pts[selVertex];
+    const w = gz.world[selVertex];
+    if (hasLen(pt.ox, pt.oy) && near(w.o)) return { part: 'out', index: selVertex };
+    if (hasLen(pt.ix, pt.iy) && near(w.i)) return { part: 'in', index: selVertex };
+  }
+  for (let i = 0; i < gz.world.length; i++) if (near(gz.world[i].v)) return { part: 'v', index: i };
+  return null;
+}
+
+/** Build the bezier outline of a path (already in composition space) on a canvas, scaled by zoom. */
+function traceCurve(g: CanvasRenderingContext2D, world: { v: Vec2; i: Vec2; o: Vec2 }[], closed: boolean, zoom: number): void {
+  g.beginPath();
+  world.forEach((w, k) => {
+    if (k === 0) g.moveTo(w.v[0] * zoom, w.v[1] * zoom);
+    if (k < world.length - 1 || closed) {
+      const n = world[(k + 1) % world.length];
+      g.bezierCurveTo(w.o[0] * zoom, w.o[1] * zoom, n.i[0] * zoom, n.i[1] * zoom, n.v[0] * zoom, n.v[1] * zoom);
+    }
+  });
+  if (closed) g.closePath();
+}
+
+/** Convert a path from composition space into a layer's own space (for masks drawn in the viewer). */
+function pathToLocal(comp: Comp, layer: Layer, t: number, v: number[]): number[] | null {
+  const inv = invert(worldMatrix(layer, t, layerMap(comp)));
+  if (!inv) return null;
+  return fromPoints(
+    toPoints(v).map((p) => {
+      const [x, y] = apply(inv, [p.x, p.y]);
+      const i = applyVec(inv, [p.ix, p.iy]);
+      const o = applyVec(inv, [p.ox, p.oy]);
+      return { x, y, ix: i[0], iy: i[1], ox: o[0], oy: o[1] };
+    }),
+  );
+}
+
+let penActive = false;
+/** True while a pen path is being drawn, so global shortcuts leave Enter / Esc / Backspace alone. */
+export const isPenActive = (): boolean => penActive;
+
 type Drag =
   | { kind: 'pan'; x: number; y: number; px: number; py: number }
   | { kind: 'zoom' }
@@ -80,7 +150,9 @@ type Drag =
   | { kind: 'scale'; id: string; handle: number; start: Vec2; anchor: Vec2; scale: Vec2; W: Mat }
   | { kind: 'rotate'; id: string; anchor: Vec2; rot: number; last: number; total: number }
   | { kind: 'create'; start: Vec2; cur: Vec2 }
-  | { kind: 'anchor'; id: string; a0: Vec2; pos0: Vec2; W0: Mat; lin: Mat };
+  | { kind: 'anchor'; id: string; a0: Vec2; pos0: Vec2; W0: Mat; lin: Mat }
+  | { kind: 'pen' }
+  | { kind: 'vertex'; layerId: string; group: PropGroup; key: string; index: number; part: 'v' | 'in' | 'out'; v0: number[]; inv: Mat; grab: Vec2; smooth: boolean };
 
 interface EditingText {
   layerId: string;
@@ -106,6 +178,29 @@ export function Viewer() {
   const [editing, setEditing] = useState<EditingText | null>(null);
   const drag = useRef<Drag | null>(null);
   const [, force] = useState(0);
+  const pen = useRef<{ pts: PathPt[]; cursor: Vec2 | null; dragging: boolean }>({ pts: [], cursor: null, dragging: false });
+
+  const resetPen = () => {
+    pen.current = { pts: [], cursor: null, dragging: false };
+    penActive = false;
+    dragTick.current++;
+    schedule();
+  };
+
+  const finishPen = (closed: boolean, keepTool = false) => {
+    const pts = pen.current.pts;
+    resetPen();
+    if (pts.length < 2) return;
+    const s = appStore.get();
+    const c = activeComp(s);
+    const t = timeStore.get().t;
+    const layer = s.selection.length === 1 ? c.layers.find((l) => l.id === s.selection[0]) : undefined;
+    if (s.toolMakesMask && layer && layer.type !== 'null') {
+      const local = pathToLocal(c, layer, t, fromPoints(pts));
+      if (local) addMask(layer.id, local);
+    } else addPathShape(fromPoints(pts), closed);
+    if (!keepTool) appStore.set({ tool: 'select' });
+  };
 
   useLayoutEffect(() => {
     const el = viewportRef.current!;
@@ -147,7 +242,7 @@ export function Viewer() {
       lastKey.current = renderKey;
       renderComp(canvas, s.project, c, t, { scale: sc, transparent: s.checkerboard, mbSamples: 6 });
     }
-    const ovKey = [...renderKey, s.selection, zoom, vp.w, vp.h, s.tool, s.safeMargins, dragTick.current];
+    const ovKey = [...renderKey, s.selection, zoom, vp.w, vp.h, s.tool, s.safeMargins, dragTick.current, s.activeMask, s.selVertex];
     if (ovKey.some((v, i) => v !== lastOverlayKey.current[i])) {
       lastOverlayKey.current = ovKey;
       drawOverlay(ov, s.project, c, t, s.selection, s.safeMargins);
@@ -218,6 +313,82 @@ export function Viewer() {
         }
       }
     }
+    // masks of the selected layer, and the vertices of whichever path is being edited
+    const st = appStore.get();
+    if (sel.length === 1) {
+      const L = c.layers.find((l) => l.id === sel[0]);
+      for (const m of L?.masks ?? []) {
+        if (m.mode === 'none') continue;
+        const mg = pathGizmo({ layer: L!, group: `mask:${m.id}`, key: 'path', prop: m.props.path, closed: true, maskId: m.id }, c, t);
+        if (!mg) continue;
+        traceCurve(g, mg.world, true, zoom);
+        g.strokeStyle = m.id === st.activeMask || (!st.activeMask && m === L!.masks[L!.masks.length - 1]) ? '#ffd24a' : 'rgba(255,210,74,0.55)';
+        g.lineWidth = 1.5;
+        g.stroke();
+      }
+    }
+    const tgt = editTarget(c, sel, st.activeMask);
+    const pgz = tgt && pathGizmo(tgt, c, t);
+    if (tgt && pgz) {
+      if (!tgt.maskId) {
+        traceCurve(g, pgz.world, pgz.closed, zoom);
+        g.strokeStyle = '#ffd24a';
+        g.lineWidth = 1.5;
+        g.stroke();
+      }
+      pgz.world.forEach((w, i) => {
+        const isSel = st.selVertex === i;
+        const pt = pgz.pts[i];
+        if (isSel) {
+          g.strokeStyle = 'rgba(255,255,255,0.7)';
+          g.lineWidth = 1;
+          g.beginPath();
+          if (hasLen(pt.ix, pt.iy)) {
+            g.moveTo(w.v[0] * zoom, w.v[1] * zoom);
+            g.lineTo(w.i[0] * zoom, w.i[1] * zoom);
+          }
+          if (hasLen(pt.ox, pt.oy)) {
+            g.moveTo(w.v[0] * zoom, w.v[1] * zoom);
+            g.lineTo(w.o[0] * zoom, w.o[1] * zoom);
+          }
+          g.stroke();
+          g.fillStyle = '#ffd24a';
+          for (const h of [hasLen(pt.ix, pt.iy) ? w.i : null, hasLen(pt.ox, pt.oy) ? w.o : null]) {
+            if (!h) continue;
+            g.beginPath();
+            g.arc(h[0] * zoom, h[1] * zoom, 4, 0, Math.PI * 2);
+            g.fill();
+          }
+        }
+        g.fillStyle = isSel ? '#ffd24a' : '#fff';
+        g.strokeStyle = '#1b1c1f';
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.rect(w.v[0] * zoom - 4, w.v[1] * zoom - 4, 8, 8);
+        g.fill();
+        g.stroke();
+      });
+    }
+    const pp = pen.current;
+    if (tool === 'pen' && pp.pts.length) {
+      const world = pp.pts.map((p) => ({ v: [p.x, p.y] as Vec2, i: [p.x + p.ix, p.y + p.iy] as Vec2, o: [p.x + p.ox, p.y + p.oy] as Vec2 }));
+      if (pp.cursor && !pp.dragging) {
+        const last = pp.pts[pp.pts.length - 1];
+        world[world.length - 1] = { ...world[world.length - 1], o: [last.x + last.ox, last.y + last.oy] };
+        world.push({ v: pp.cursor, i: pp.cursor, o: pp.cursor });
+      }
+      traceCurve(g, world, false, zoom);
+      g.strokeStyle = '#4aa3ff';
+      g.lineWidth = 1.5;
+      g.stroke();
+      pp.pts.forEach((p, i) => {
+        g.fillStyle = i === 0 ? '#ffd24a' : '#fff';
+        g.beginPath();
+        g.rect(p.x * zoom - 4, p.y * zoom - 4, 8, 8);
+        g.fill();
+        g.stroke();
+      });
+    }
     const d = drag.current;
     if (d?.kind === 'create') {
       const r = createRect(d.start, d.cur, shiftHeld.current, altHeld.current);
@@ -248,6 +419,33 @@ export function Viewer() {
     lastOverlayKey.current = [];
     schedule();
   }, [comp.id, vp.w, vp.h, zoom, quality, assetVersion]);
+
+  // leaving the pen tool keeps whatever path was drawn so far; Enter / Esc / Backspace drive drawing
+  useEffect(() => {
+    if (tool !== 'pen') {
+      if (pen.current.pts.length) finishPen(false, true);
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (!pen.current.pts.length) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finishPen(false);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        resetPen();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        pen.current.pts.pop();
+        if (!pen.current.pts.length) penActive = false;
+        dragTick.current++;
+        schedule();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   /* ---- coordinates ---- */
   const toComp = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -326,6 +524,22 @@ export function Viewer() {
       drag.current = { kind: 'create', start: p, cur: p };
       return;
     }
+    if (tool === 'pen') {
+      const pts = pen.current.pts;
+      if (pts.length >= 2 && Math.hypot(p[0] - pts[0].x, p[1] - pts[0].y) <= 9 / zoom) {
+        finishPen(true);
+        return;
+      }
+      const last = pts[pts.length - 1];
+      if (!last || Math.hypot(p[0] - last.x, p[1] - last.y) > 1.5 / zoom) pts.push(corner(p[0], p[1]));
+      pen.current.dragging = true;
+      penActive = true;
+      el.setPointerCapture(e.pointerId);
+      drag.current = { kind: 'pen' };
+      dragTick.current++;
+      schedule();
+      return;
+    }
     if (tool === 'text') {
       const id = addText('Text', p);
       appStore.set({ tool: 'select' });
@@ -361,7 +575,40 @@ export function Viewer() {
       return;
     }
 
-    // select tool
+    // select tool: path vertices and tangents take priority over the layer's transform handles
+    const pt = editTarget(c, s.selection, s.activeMask);
+    const pg = pt && pathGizmo(pt, c, t);
+    const ph = pt && pg ? pathHit(pg, s.selVertex, p, 8 / zoom) : null;
+    if (pt && pg && ph) {
+      appStore.set({ selVertex: ph.index });
+      if (e.altKey && ph.part === 'v') {
+        // Alt-click toggles between a smooth and a corner vertex
+        const pts = toPoints(evalProp(pt.prop, t) as number[]);
+        pts[ph.index] = isSmooth(pts[ph.index]) ? corner(pts[ph.index].x, pts[ph.index].y) : smoothVertex(pts, ph.index, pt.closed);
+        setManyProps([{ layerId: pt.layer.id, group: pt.group, key: pt.key, value: fromPoints(pts) }], t);
+        return;
+      }
+      const inv = invert(pg.W);
+      if (!inv) return;
+      const q = apply(inv, p);
+      const v0 = (evalProp(pt.prop, t) as number[]).slice();
+      el.setPointerCapture(e.pointerId);
+      beginGesture();
+      drag.current = {
+        kind: 'vertex',
+        layerId: pt.layer.id,
+        group: pt.group,
+        key: pt.key,
+        index: ph.index,
+        part: ph.part,
+        v0,
+        inv,
+        grab: [pg.pts[ph.index].x - q[0], pg.pts[ph.index].y - q[1]],
+        smooth: isSmooth(pg.pts[ph.index]),
+      };
+      return;
+    }
+
     const gh = gizmoHit(p);
     if (gh) {
       const l = c.layers.find((x) => x.id === s.selection[0])!;
@@ -413,6 +660,11 @@ export function Viewer() {
     altHeld.current = e.altKey;
     const d = drag.current;
     const t = timeStore.get().t;
+    if (tool === 'pen' && pen.current.pts.length && d?.kind !== 'pen') {
+      pen.current.cursor = toComp(e);
+      dragTick.current++;
+      schedule();
+    }
     if (!d) {
       // hover feedback
       if (tool === 'select' && viewportRef.current) {
@@ -426,6 +678,55 @@ export function Viewer() {
       return;
     }
     const p = toComp(e);
+    if (d.kind === 'pen') {
+      const pts = pen.current.pts;
+      const last = pts[pts.length - 1];
+      if (last && pen.current.dragging) {
+        // dragging while placing a vertex pulls out symmetric smooth tangents
+        last.ox = p[0] - last.x;
+        last.oy = p[1] - last.y;
+        last.ix = -last.ox;
+        last.iy = -last.oy;
+      }
+      pen.current.cursor = p;
+      dragTick.current++;
+      schedule();
+      return;
+    }
+    if (d.kind === 'vertex') {
+      const q = apply(d.inv, p);
+      const pts = toPoints(d.v0);
+      const pt = pts[d.index];
+      if (d.part === 'v') {
+        pt.x = q[0] + d.grab[0];
+        pt.y = q[1] + d.grab[1];
+      } else {
+        const dx = q[0] - pt.x;
+        const dy = q[1] - pt.y;
+        const mirror = d.smooth && !e.altKey;
+        if (d.part === 'out') {
+          const lenI = Math.hypot(pt.ix, pt.iy);
+          pt.ox = dx;
+          pt.oy = dy;
+          if (mirror) {
+            const lo = Math.hypot(dx, dy) || 1;
+            pt.ix = (-dx / lo) * lenI;
+            pt.iy = (-dy / lo) * lenI;
+          }
+        } else {
+          const lenO = Math.hypot(pt.ox, pt.oy);
+          pt.ix = dx;
+          pt.iy = dy;
+          if (mirror) {
+            const li = Math.hypot(dx, dy) || 1;
+            pt.ox = (-dx / li) * lenO;
+            pt.oy = (-dy / li) * lenO;
+          }
+        }
+      }
+      setManyProps([{ layerId: d.layerId, group: d.group, key: d.key, value: fromPoints(pts) }], t);
+      return;
+    }
     if (d.kind === 'create') {
       d.cur = p;
       dragTick.current++;
@@ -497,23 +798,58 @@ export function Viewer() {
     drag.current = null;
     if (!d) return;
     viewportRef.current?.releasePointerCapture?.(e.pointerId);
+    if (d.kind === 'pen') {
+      pen.current.dragging = false;
+      dragTick.current++;
+      schedule();
+      return;
+    }
     if (d.kind === 'create') {
       const r = createRect(d.start, d.cur, e.shiftKey, e.altKey);
       const tiny = r.w * zoom < 6 && r.h * zoom < 6;
       const size: Vec2 = tiny ? [240, 240] : [Math.max(2, r.w), Math.max(2, r.h)];
       const center: Vec2 = tiny ? d.start : [r.x + r.w / 2, r.y + r.h / 2];
-      addShape(appStore.get().shapeTool, size, center);
+      const st = appStore.get();
+      const c = activeComp(st);
+      const layer = st.selection.length === 1 ? c.layers.find((l) => l.id === st.selection[0]) : undefined;
+      if (st.toolMakesMask && layer && layer.type !== 'null') {
+        const x = center[0] - size[0] / 2;
+        const y = center[1] - size[1] / 2;
+        const compPath = st.shapeTool === 'ellipse' ? ellipsePath(center[0], center[1], size[0] / 2, size[1] / 2) : rectPath(x, y, size[0], size[1]);
+        const local = pathToLocal(c, layer, timeStore.get().t, compPath);
+        if (local) addMask(layer.id, local);
+      } else addShape(st.shapeTool, size, center);
       appStore.set({ tool: 'select' });
       dragTick.current++;
       schedule();
       return;
     }
-    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor') endGesture();
+    if (d.kind === 'move' || d.kind === 'scale' || d.kind === 'rotate' || d.kind === 'anchor' || d.kind === 'vertex') endGesture();
     force((n) => n + 1);
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
+    if (tool === 'pen') {
+      if (pen.current.pts.length >= 2) finishPen(false);
+      return;
+    }
     if (tool !== 'select') return;
+    // double-click on a path segment inserts a vertex there
+    {
+      const s = appStore.get();
+      const c = activeComp(s);
+      const t = timeStore.get().t;
+      const pt = editTarget(c, s.selection, s.activeMask);
+      const pg = pt && pathGizmo(pt, c, t);
+      if (pt && pg && !pathHit(pg, s.selVertex, toComp(e), 8 / zoom)) {
+        const flat = fromPoints(pg.world.map((w) => ({ x: w.v[0], y: w.v[1], ix: w.i[0] - w.v[0], iy: w.i[1] - w.v[1], ox: w.o[0] - w.v[0], oy: w.o[1] - w.v[1] })));
+        const near = nearestOnPath(flat, pg.closed, toComp(e));
+        if (near && near.dist <= 10 / zoom) {
+          insertPathVertex(pt.layer.id, pt.group, pt.key, near.seg, near.u, pt.closed);
+          return;
+        }
+      }
+    }
     const id = pickLayer(toComp(e));
     if (!id) return;
     const l = activeComp().layers.find((x) => x.id === id);
@@ -549,7 +885,7 @@ export function Viewer() {
     }
   }
 
-  const cursor = tool === 'hand' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'shape' || tool === 'anchor' ? 'crosshair' : tool === 'text' ? 'text' : '';
+  const cursor = tool === 'hand' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'shape' || tool === 'anchor' || tool === 'pen' ? 'crosshair' : tool === 'text' ? 'text' : '';
 
   return (
     <div className="viewer">

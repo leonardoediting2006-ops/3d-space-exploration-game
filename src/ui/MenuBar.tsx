@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   addAdjustment,
   addNull,
+  addStarterMask,
   addShape,
   addText,
   applyKeyEase,
@@ -109,6 +110,9 @@ export function MenuBar() {
       { label: 'New Text Layer', run: () => addText('Text', center()) },
       { label: 'New Null Object', run: addNull },
       { label: 'New Adjustment Layer', run: addAdjustment },
+      { sep: true },
+      { label: 'New Mask: Rectangle', run: () => addStarterMask(selection[0], 'rect'), disabled: selection.length !== 1 },
+      { label: 'New Mask: Ellipse', run: () => addStarterMask(selection[0], 'ellipse'), disabled: selection.length !== 1 },
       { sep: true },
       { label: 'Split Layer', shortcut: 'Ctrl+Shift+D', run: () => splitLayers(selection), disabled: !hasSel },
       { label: 'Pre-compose…', shortcut: 'Ctrl+Shift+C', run: () => precompose(selection), disabled: !hasSel },

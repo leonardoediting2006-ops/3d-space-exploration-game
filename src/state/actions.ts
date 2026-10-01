@@ -2,6 +2,9 @@ import { createEffect } from '../core/effectDefs';
 import {
   createAdjustment,
   createComp,
+  createMask,
+  createPathShape,
+  starterMaskPath,
   createImageLayer,
   createNull,
   createPrecompLayer,
@@ -14,6 +17,7 @@ import {
 import { uid } from '../core/ids';
 import { baseValue, evalProp, setAnimated, setKeyAt, sortKeys } from '../core/interp';
 import { clamp } from '../core/math';
+import { insertVertex, removeVertex } from '../core/path';
 import { cloneLayer, layerProps, layerPropEntries, PRESETS, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
 import { snapToFrame } from '../core/time';
@@ -24,6 +28,7 @@ import type {
   Keyframe,
   Layer,
   LayerData,
+  MaskMode,
   MatteMode,
   Project,
   Prop,
@@ -35,6 +40,7 @@ import type {
   Wiggle,
 } from '../core/types';
 import { allAssetData, clearAssets, imageSize, readFileAsDataUrl, setAssetData } from '../render/assets';
+import { localBounds } from '../render/geometry';
 import { downloadBlob } from '../render/export';
 import { appStore, activeComp, commit, resetHistory, timeStore, toast } from './store';
 
@@ -268,7 +274,7 @@ export function addSolid(o?: { name?: string; color?: RGB; width?: number; heigh
 
 export function addShape(shape: ShapeKind, size: Vec2, position?: Vec2): string {
   const t = now();
-  const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon', star: 'Star' } as const;
+  const names = { rect: 'Rectangle', ellipse: 'Ellipse', polygon: 'Polygon', star: 'Star', path: 'Shape' } as const;
   return insertLayer((comp, p) =>
     createShape({ name: `${names[shape]} ${nextCount(p, 'shape')}`, comp, time: t, shape, size, position }),
   );
@@ -1026,4 +1032,79 @@ export function setAnchorKeepingPlace(layerId: string, anchor: Vec2, position: V
     { layerId, group: 'transform', key: 'anchor', value: anchor },
     { layerId, group: 'transform', key: 'position', value: position },
   ]);
+}
+
+/* ------------------------------------------------------------------ paths & masks */
+
+/** A freeform bezier shape layer from a path in composition coordinates. */
+export function addPathShape(path: number[], closed: boolean): string {
+  const t = now();
+  return insertLayer((comp, p) => createPathShape({ name: `Shape ${nextCount(p, 'shape')}`, comp, time: t, path, closed }));
+}
+
+/** Add a mask to a layer. `path` is in the layer's own coordinate space. */
+export function addMask(layerId: string, path: number[], mode: MaskMode = 'add'): string {
+  const compId = S().activeCompId;
+  let id = '';
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    if (!l) return;
+    const m = createMask(path, `Mask ${l.masks.length + 1}`, mode);
+    id = m.id;
+    l.masks.push(m);
+  });
+  if (id) appStore.set({ activeMask: id, selVertex: null });
+  return id;
+}
+
+/** A starter rectangular or elliptical mask covering the layer's bounds. */
+export function addStarterMask(layerId: string, kind: 'rect' | 'ellipse'): void {
+  const s = S();
+  const layer = activeComp(s).layers.find((l) => l.id === layerId);
+  const b = layer && localBounds(s.project, layer, now());
+  if (!layer || !b) return void toast('That layer has nothing to mask.');
+  addMask(layerId, starterMaskPath(kind, b.x, b.y, b.w, b.h));
+}
+
+export function removeMask(layerId: string, maskId: string): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    if (l) l.masks = l.masks.filter((m) => m.id !== maskId);
+  });
+  if (S().activeMask === maskId) appStore.set({ activeMask: null, selVertex: null });
+}
+
+export function setMaskField(layerId: string, maskId: string, patch: { mode?: MaskMode; inverted?: boolean; name?: string }): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const m = p.comps[compId].layers.find((x) => x.id === layerId)?.masks.find((x) => x.id === maskId);
+    if (m) Object.assign(m, patch);
+  });
+}
+
+function mapPath(prop: { value: PropValue; keys: Keyframe[] }, fn: (v: number[]) => number[]): void {
+  prop.value = fn(prop.value as number[]);
+  for (const k of prop.keys) k.v = fn(k.v as number[]);
+}
+
+/** Split a path segment, adding the same vertex to every keyframe so the shapes stay compatible. */
+export function insertPathVertex(layerId: string, group: PropGroup, key: string, seg: number, u: number, closed: boolean): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    const prop = l && resolveProp(l, group, key);
+    if (prop) mapPath(prop, (v) => insertVertex(v, seg, u, closed));
+  });
+  appStore.set({ selVertex: seg + 1 });
+}
+
+export function removePathVertex(layerId: string, group: PropGroup, key: string, index: number): void {
+  const compId = S().activeCompId;
+  commit((p) => {
+    const l = p.comps[compId].layers.find((x) => x.id === layerId);
+    const prop = l && resolveProp(l, group, key);
+    if (prop) mapPath(prop, (v) => removeVertex(v, index));
+  });
+  appStore.set({ selVertex: null });
 }

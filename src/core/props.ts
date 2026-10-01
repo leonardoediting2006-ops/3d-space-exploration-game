@@ -7,6 +7,7 @@ export function layerProps(layer: Layer): Prop[] {
   const out: Prop[] = TRANSFORM_KEYS.map((k) => layer.transform[k]);
   out.push(...Object.values(layer.content));
   for (const fx of layer.effects) out.push(...Object.values(fx.props));
+  for (const m of layer.masks) out.push(...Object.values(m.props));
   return out;
 }
 
@@ -21,14 +22,15 @@ export function layerPropEntries(layer: Layer): PropEntry[] {
   const out: PropEntry[] = TRANSFORM_KEYS.map((k) => ({ group: 'transform' as PropGroup, key: k, prop: layer.transform[k] }));
   for (const [k, p] of Object.entries(layer.content)) out.push({ group: 'content', key: k, prop: p });
   for (const fx of layer.effects) for (const [k, p] of Object.entries(fx.props)) out.push({ group: `fx:${fx.id}`, key: k, prop: p });
+  for (const m of layer.masks) for (const [k, p] of Object.entries(m.props)) out.push({ group: `mask:${m.id}`, key: k, prop: p });
   return out;
 }
 
 export function resolveProp(layer: Layer, group: PropGroup, key: string): Prop | undefined {
   if (group === 'transform') return layer.transform[key as keyof Layer['transform']];
   if (group === 'content') return layer.content[key];
-  const fx = layer.effects.find((e) => `fx:${e.id}` === group);
-  return fx?.props[key];
+  if (group.startsWith('mask:')) return layer.masks.find((m) => `mask:${m.id}` === group)?.props[key];
+  return layer.effects.find((e) => `fx:${e.id}` === group)?.props[key];
 }
 
 /** Move a layer in time: its in/out/start and every keyframe travel together. */
@@ -49,6 +51,7 @@ export function cloneLayer(layer: Layer): Layer {
   copy.id = uid('layer');
   for (const p of layerProps(copy)) for (const k of p.keys) k.id = uid('k');
   for (const fx of copy.effects) fx.id = uid('fx');
+  for (const m of copy.masks) m.id = uid('mask');
   return copy;
 }
 
