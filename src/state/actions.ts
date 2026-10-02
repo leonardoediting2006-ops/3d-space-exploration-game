@@ -42,6 +42,7 @@ import type {
   BlendMode,
   Comp,
   Ease,
+  Effect,
   Keyframe,
   Layer,
   LayerData,
@@ -447,21 +448,25 @@ type LayerFlags = Partial<Pick<Layer, 'name' | 'visible' | 'solo' | 'locked' | '
   matte?: MatteMode;
 };
 
-export function setLayerField(id: string, patch: LayerFlags): void {
+/** Change layer switches (visibility, lock, blend…) on one layer, or on several as one undo step. */
+export function setLayerField(id: string | string[], patch: LayerFlags): void {
+  const ids = Array.isArray(id) ? id : [id];
   const compId = S().activeCompId;
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === id);
-    if (l) Object.assign(l, patch);
+    for (const l of p.comps[compId].layers) if (ids.includes(l.id)) Object.assign(l, patch);
   });
 }
 
-export function updateLayerData(id: string, patch: Partial<LayerData>): void {
+/** Change what a layer is made of (text, font, size…). Layers whose type does not take the change are left alone. */
+export function updateLayerData(id: string | string[], patch: Partial<LayerData>): void {
+  const ids = Array.isArray(id) ? id : [id];
   const compId = S().activeCompId;
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === id);
-    if (!l) return;
-    if (l.data.type === 'text' && 'text' in patch && l.name === l.data.text) l.name = String((patch as { text: string }).text);
-    l.data = { ...l.data, ...patch } as LayerData;
+    for (const l of p.comps[compId].layers) {
+      if (!ids.includes(l.id)) continue;
+      if (l.data.type === 'text' && 'text' in patch && l.name === l.data.text) l.name = String((patch as { text: string }).text);
+      l.data = { ...l.data, ...patch } as LayerData;
+    }
   });
 }
 
@@ -549,31 +554,63 @@ export function setPropValue(layerId: string, group: PropGroup, key: string, val
   });
 }
 
+/** One property of one layer. The Inspector edits several layers at once by passing several of these. */
+export interface PropTarget {
+  layerId: string;
+  group: PropGroup;
+  key: string;
+}
+
+/** Resolve targets to the live properties of the draft document. */
+function targetProps(p: Project, targets: PropTarget[]): { prop: Prop; layer: Layer; comp: Comp; target: PropTarget }[] {
+  const comp = p.comps[S().activeCompId];
+  const out: { prop: Prop; layer: Layer; comp: Comp; target: PropTarget }[] = [];
+  for (const target of targets) {
+    const layer = comp.layers.find((x) => x.id === target.layerId);
+    const prop = layer && resolveProp(layer, target.group, target.key);
+    if (layer && prop) out.push({ prop, layer, comp, target });
+  }
+  return out;
+}
+
 export function toggleStopwatch(layerId: string, group: PropGroup, key: string): void {
-  const compId = S().activeCompId;
+  toggleStopwatchMany([{ layerId, group, key }]);
+}
+
+/** The stopwatch for several layers' copies of a property: start animating any that are not, or stop animating all if they all are. */
+export function toggleStopwatchMany(targets: PropTarget[]): void {
   const t = now();
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    const prop = l && resolveProp(l, group, key);
-    if (prop) setAnimated(prop, prop.keys.length === 0, t);
+    const items = targetProps(p, targets);
+    const animate = items.some((i) => i.prop.keys.length === 0);
+    for (const { prop } of items) if (!animate || prop.keys.length === 0) setAnimated(prop, animate, t);
   });
 }
 
 /** The ◆ button: add a keyframe at the playhead holding the current value, or remove the one there. */
 export function toggleKeyHere(layerId: string, group: PropGroup, key: string): void {
-  const compId = S().activeCompId;
+  toggleKeyHereMany([{ layerId, group, key }]);
+}
+
+/** Add a keyframe at the playhead on every target that lacks one; if they all have one, remove them. */
+export function toggleKeyHereMany(targets: PropTarget[]): void {
   const t = now();
   commit((p) => {
-    const comp = p.comps[compId];
-    const l = comp.layers.find((x) => x.id === layerId);
-    const prop = l && resolveProp(l, group, key);
-    if (!prop) return;
-    const near = prop.keys.find((k) => Math.abs(k.t - t) <= keyTol(comp));
-    if (!prop.keys.length) setAnimated(prop, true, t);
-    else if (near) {
-      if (prop.keys.length === 1) setAnimated(prop, false, t);
-      else prop.keys = prop.keys.filter((k) => k !== near);
-    } else setKeyAt(prop, t, evalProp(prop, t), keyTol(comp));
+    const items = targetProps(p, targets);
+    if (!items.length) return;
+    const tol = keyTol(items[0].comp);
+    const near = (prop: Prop) => prop.keys.find((k) => Math.abs(k.t - t) <= tol);
+    const remove = items.every((i) => i.prop.keys.length > 0 && near(i.prop));
+    for (const { prop } of items) {
+      const at = near(prop);
+      if (remove) {
+        if (prop.keys.length === 1) setAnimated(prop, false, t);
+        else prop.keys = prop.keys.filter((k) => k !== at);
+      } else if (!at) {
+        if (!prop.keys.length) setAnimated(prop, true, t);
+        else setKeyAt(prop, t, evalProp(prop, t), tol);
+      }
+    }
   });
 }
 
@@ -629,33 +666,38 @@ export function setKeysEase(ids: string[], ease: Ease): void {
 }
 
 export function setWiggle(layerId: string, group: PropGroup, key: string, wiggle: Wiggle | null): void {
-  const compId = S().activeCompId;
+  setWiggleMany([{ layerId, group, key }], wiggle);
+}
+
+export function setWiggleMany(targets: PropTarget[], wiggle: Wiggle | null): void {
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    const prop = l && resolveProp(l, group, key);
-    if (!prop) return;
-    if (wiggle) prop.wiggle = wiggle;
-    else delete prop.wiggle;
+    for (const { prop } of targetProps(p, targets)) {
+      if (wiggle) prop.wiggle = { ...wiggle };
+      else delete prop.wiggle;
+    }
   });
 }
 
 export function setLoop(layerId: string, group: PropGroup, key: string, loop: 'cycle' | 'pingpong' | null): void {
-  const compId = S().activeCompId;
+  setLoopMany([{ layerId, group, key }], loop);
+}
+
+export function setLoopMany(targets: PropTarget[], loop: 'cycle' | 'pingpong' | null): void {
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    const prop = l && resolveProp(l, group, key);
-    if (!prop) return;
-    if (loop) prop.loop = loop;
-    else delete prop.loop;
+    for (const { prop } of targetProps(p, targets)) {
+      if (loop) prop.loop = loop;
+      else delete prop.loop;
+    }
   });
 }
 
 export function setPropLink(layerId: string, group: PropGroup, key: string, link: boolean): void {
-  const compId = S().activeCompId;
+  setPropLinkMany([{ layerId, group, key }], link);
+}
+
+export function setPropLinkMany(targets: PropTarget[], link: boolean): void {
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    const prop = l && resolveProp(l, group, key);
-    if (prop) prop.link = link;
+    for (const { prop } of targetProps(p, targets)) prop.link = link;
   });
 }
 
@@ -674,33 +716,54 @@ export function addEffect(layerIds: string[], type: string): void {
   if (layerIds.length) appStore.set({ rightTab: 'inspector' });
 }
 
+/** One effect on one layer; several of these let the Inspector change the same effect on several layers. */
+export interface EffectTarget {
+  layerId: string;
+  effectId: string;
+}
+
+function eachEffect(p: Project, targets: EffectTarget[], fn: (layer: Layer, fx: Effect) => void): void {
+  const comp = p.comps[S().activeCompId];
+  for (const t of targets) {
+    const layer = comp.layers.find((x) => x.id === t.layerId);
+    const fx = layer?.effects.find((e) => e.id === t.effectId);
+    if (layer && fx) fn(layer, fx);
+  }
+}
+
 export function removeEffect(layerId: string, effectId: string): void {
-  const compId = S().activeCompId;
+  removeEffects([{ layerId, effectId }]);
+}
+
+export function removeEffects(targets: EffectTarget[]): void {
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    if (!l) return;
-    l.effects = l.effects.filter((e) => e.id !== effectId);
-    pruneInstances(l);
+    eachEffect(p, targets, (l, fx) => {
+      l.effects = l.effects.filter((e) => e !== fx);
+      pruneInstances(l);
+    });
   });
 }
 
 export function setEffectEnabled(layerId: string, effectId: string, enabled: boolean): void {
-  const compId = S().activeCompId;
-  commit((p) => {
-    const fx = p.comps[compId].layers.find((x) => x.id === layerId)?.effects.find((e) => e.id === effectId);
-    if (fx) fx.enabled = enabled;
-  });
+  setEffectsEnabled([{ layerId, effectId }], enabled);
+}
+
+export function setEffectsEnabled(targets: EffectTarget[], enabled: boolean): void {
+  commit((p) => eachEffect(p, targets, (_l, fx) => void (fx.enabled = enabled)));
 }
 
 export function moveEffect(layerId: string, effectId: string, dir: -1 | 1): void {
-  const compId = S().activeCompId;
+  moveEffects([{ layerId, effectId }], dir);
+}
+
+export function moveEffects(targets: EffectTarget[], dir: -1 | 1): void {
   commit((p) => {
-    const l = p.comps[compId].layers.find((x) => x.id === layerId);
-    if (!l) return;
-    const i = l.effects.findIndex((e) => e.id === effectId);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= l.effects.length) return;
-    [l.effects[i], l.effects[j]] = [l.effects[j], l.effects[i]];
+    eachEffect(p, targets, (l, fx) => {
+      const i = l.effects.indexOf(fx);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= l.effects.length) return;
+      [l.effects[i], l.effects[j]] = [l.effects[j], l.effects[i]];
+    });
   });
 }
 
@@ -1353,10 +1416,18 @@ export function setKeyTime(keyId: string, t: number): void {
 
 /** Put a property back to its neutral / default value (at the playhead if it is animated). */
 export function resetProp(layerId: string, group: PropGroup, key: string): void {
+  resetProps([{ layerId, group, key }]);
+}
+
+export function resetProps(targets: PropTarget[]): void {
   const comp = activeComp();
-  const layer = comp.layers.find((l) => l.id === layerId);
-  const v = layer && defaultPropValue(layer, comp, group, key);
-  if (v !== undefined) setPropValue(layerId, group, key, v);
+  const updates: PropUpdate[] = [];
+  for (const t of targets) {
+    const layer = comp.layers.find((l) => l.id === t.layerId);
+    const value = layer && defaultPropValue(layer, comp, t.group, t.key);
+    if (value !== undefined) updates.push({ layerId: t.layerId, group: t.group, key: t.key, value });
+  }
+  if (updates.length) setManyProps(updates);
 }
 
 /** Reset the transform (position, scale, rotation, opacity) of layers. */

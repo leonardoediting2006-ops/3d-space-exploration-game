@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { defaultPropValue, sameValue } from '../core/defaults';
 import { baseValue } from '../core/interp';
-import type { Comp, Keyframe, Layer, Prop, PropGroup } from '../core/types';
-import { deleteKeys, resetProp, setKeyTime, setKeyValue, setLoop, setTime, setWiggle, toggleKeyHere, toggleStopwatch, setKeysEase } from '../state/actions';
+import type { Comp, Keyframe, Layer, Prop, PropGroup, PropValue } from '../core/types';
+import { deleteKeys, resetProps, setWiggle, setKeyTime, setKeyValue, setLoop, setManyProps, setPropLinkMany, setPropValue, setTime, setWiggleMany, toggleKeyHereMany, toggleStopwatchMany, setKeysEase } from '../state/actions';
 import { EaseButton } from './EaseEditor';
 import { NumberField, useTimeIf } from './fields';
 import { Icon } from './Icon';
+import { applyEdit, mixedParts, type Member } from './multi';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
-import { PropEditor, ValueEditor } from './PropEditor';
+import { PropEditor, ValueEditor, type Edit } from './PropEditor';
 import { PropGraph } from './PropGraph';
 
 interface PropRowProps {
+  /** The first selected layer: what the row shows and what its details panel edits. */
   layer: Layer;
   comp: Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
   group: PropGroup;
@@ -19,48 +21,72 @@ interface PropRowProps {
   label?: string;
   /** Hide the keyframe controls (properties that cannot animate, like dropdown-style settings). */
   noKeys?: boolean;
+  /** The same property on the other selected layers: edits, keyframes and resets then apply to all of them. */
+  peers?: Member[];
 }
 
 /**
  * One property in the Inspector: a label, its editor, and the keyframe controls. Animated
  * properties can be expanded to edit every keyframe's time, value and easing, and to add loop and wiggle.
+ * With several layers selected the row edits all of them: layers that disagree show "Mixed".
  */
-export function PropRow({ layer, comp, group, propKey, prop, label, noKeys }: PropRowProps) {
-  const animated = prop.keys.length > 0;
+export function PropRow({ layer, comp, group, propKey, prop, label, noKeys, peers = [] }: PropRowProps) {
+  const members: Member[] = [{ layer, group, prop }, ...peers];
+  const multi = members.length > 1;
+  const targets = members.map((m) => ({ layerId: m.layer.id, group: m.group, key: propKey }));
+  const animatedAll = members.every((m) => m.prop.keys.length > 0);
+  const animated = members.some((m) => m.prop.keys.length > 0);
   const t = useTimeIf(animated);
   const [open, setOpen] = useState(false);
   const menu = useAnchor();
   const eps = 0.5 / comp.fps;
-  const atKey = animated && prop.keys.some((k) => Math.abs(k.t - t) <= eps);
+  const keyTimes = [...new Set(members.flatMap((m) => m.prop.keys.map((k) => k.t)))].sort((a, b) => a - b);
+  const atKey = animatedAll && members.every((m) => m.prop.keys.some((k) => Math.abs(k.t - t) <= eps));
   const jump = (dir: 1 | -1) => {
-    const target = dir > 0 ? prop.keys.find((k) => k.t > t + eps) : [...prop.keys].reverse().find((k) => k.t < t - eps);
-    if (target) setTime(target.t);
+    const target = dir > 0 ? keyTimes.find((k) => k > t + eps) : [...keyTimes].reverse().find((k) => k < t - eps);
+    if (target !== undefined) setTime(target);
   };
 
-  const def = defaultPropValue(layer, comp, group, propKey);
-  const current = baseValue(prop, t);
-  const canReset = def !== undefined && !(prop.kind === 'color') && !sameValue(current, def);
-  const hasDetails = animated || !!prop.wiggle;
+  const values = members.map((m) => baseValue(m.prop, t));
+  const mixed = multi ? mixedParts(values) : undefined;
+  const defs = members.map((m) => defaultPropValue(m.layer, comp, m.group, propKey));
+  const canReset = prop.kind !== 'color' && members.some((_, i) => defs[i] !== undefined && !sameValue(values[i], defs[i]!));
+  const hasReset = prop.kind !== 'color' && defs[0] !== undefined;
+  const hasDetails = !multi && (animated || !!prop.wiggle);
   const canAnimate = !noKeys && prop.kind !== 'path' && !prop.options;
+  if (multi && (prop.kind === 'gradient' || prop.kind === 'path')) return null;
+
+  const change = (next: PropValue, edit?: Edit) => {
+    if (!multi) return setPropValue(layer.id, group, propKey, next);
+    setManyProps(members.map((m, i) => ({ layerId: m.layer.id, group: m.group, key: propKey, value: applyEdit(values[i], values[0], next, edit, prop) })));
+  };
 
   const entries: MenuEntry[] = [];
-  if (def !== undefined && prop.kind !== 'color') entries.push({ label: 'Reset to default', icon: <Icon name="reset" />, run: () => resetProp(layer.id, group, propKey), disabled: !canReset });
-  if (animated) {
-    entries.push({ label: open ? 'Hide keyframes' : 'Show keyframes', icon: <Icon name="diamond" />, run: () => setOpen(!open), sep: entries.length > 0 });
-    entries.push({ label: 'Stop animating (keep current value)', icon: <Icon name="close" />, run: () => toggleStopwatch(layer.id, group, propKey) });
+  if (hasReset) entries.push({ label: multi ? 'Reset all to default' : 'Reset to default', icon: <Icon name="reset" />, run: () => resetProps(targets), disabled: !canReset });
+  if (animatedAll) {
+    if (hasDetails) entries.push({ label: open ? 'Hide keyframes' : 'Show keyframes', icon: <Icon name="diamond" />, run: () => setOpen(!open), sep: entries.length > 0 });
+    entries.push({ label: multi ? 'Stop animating all (keep current values)' : 'Stop animating (keep current value)', icon: <Icon name="close" />, run: () => toggleStopwatchMany(targets), sep: entries.length > 0 && !hasDetails });
   } else if (canAnimate) {
-    entries.push({ label: 'Animate this property', icon: <Icon name="diamond" />, run: () => toggleStopwatch(layer.id, group, propKey), sep: entries.length > 0 });
+    entries.push({ label: multi ? 'Animate on all selected layers' : 'Animate this property', icon: <Icon name="diamond" />, run: () => toggleStopwatchMany(targets), sep: entries.length > 0 });
   }
   if (canAnimate && prop.kind !== 'color' && prop.kind !== 'gradient') {
+    const wiggling = members.every((m) => m.prop.wiggle);
     entries.push(
-      prop.wiggle
-        ? { label: 'Remove wiggle', icon: <Icon name="close" />, run: () => setWiggle(layer.id, group, propKey, null) }
-        : { label: 'Add wiggle (random jitter)', icon: <Icon name="sparkle" />, run: () => { setWiggle(layer.id, group, propKey, { freq: 2, amp: prop.kind === 'vec2' ? 40 : 10, seed: Math.floor(Math.random() * 1000) }); setOpen(true); } },
+      wiggling
+        ? { label: multi ? 'Remove wiggle from all' : 'Remove wiggle', icon: <Icon name="close" />, run: () => setWiggleMany(targets, null) }
+        : {
+            label: multi ? 'Add wiggle to all (random jitter)' : 'Add wiggle (random jitter)',
+            icon: <Icon name="sparkle" />,
+            run: () => {
+              setWiggleMany(targets, { freq: 2, amp: prop.kind === 'vec2' ? 40 : 10, seed: Math.floor(Math.random() * 1000) });
+              if (!multi) setOpen(true);
+            },
+          },
     );
   }
 
   return (
-    <div className={`prop-row ${animated ? 'animated' : ''}`} data-testid={`ins-${propKey}`}>
+    <div className={`prop-row ${animatedAll ? 'animated' : ''} ${animated && !animatedAll ? 'partly' : ''}`} data-testid={`ins-${propKey}`}>
       <div className="pr-line">
         <div className="pr-label" onContextMenu={(e) => { e.preventDefault(); menu.open(e); }} title={prop.label}>
           {hasDetails && !noKeys ? (
@@ -75,21 +101,30 @@ export function PropRow({ layer, comp, group, propKey, prop, label, noKeys }: Pr
           {prop.loop && <i className="badge" title={`Loops (${prop.loop})`}>∞</i>}
         </div>
         <div className="pr-editor">
-          <PropEditor layerId={layer.id} group={group} propKey={propKey} prop={prop} slider />
+          {prop.kind === 'gradient' ? (
+            <PropEditor layerId={layer.id} group={group} propKey={propKey} prop={prop} slider />
+          ) : (
+            <ValueEditor prop={prop} value={values[0]} mixed={mixed} slider onChange={change} onToggleLink={() => setPropLinkMany(targets, !(prop.link === true))} />
+          )}
         </div>
         <div className="pr-tools">
           {canReset && (
-            <button className="icon-btn reset" title="Reset to default" onClick={() => resetProp(layer.id, group, propKey)} data-testid="prop-reset">
+            <button className="icon-btn reset" title={multi ? 'Reset all to default' : 'Reset to default'} onClick={() => resetProps(targets)} data-testid="prop-reset">
               <Icon name="reset" size={12} />
             </button>
           )}
           {canAnimate &&
-            (animated ? (
+            (animatedAll ? (
               <span className="kfnav">
                 <button className="icon-btn" title="Previous keyframe" onClick={() => jump(-1)}>
                   <Icon name="prev" size={12} />
                 </button>
-                <button className={`icon-btn kf-toggle ${atKey ? 'on' : ''}`} title={atKey ? 'Remove the keyframe at the playhead' : 'Add a keyframe at the playhead'} onClick={() => toggleKeyHere(layer.id, group, propKey)} data-testid="prop-key">
+                <button
+                  className={`icon-btn kf-toggle ${atKey ? 'on' : ''}`}
+                  title={atKey ? 'Remove the keyframe at the playhead' : 'Add a keyframe at the playhead'}
+                  onClick={() => toggleKeyHereMany(targets)}
+                  data-testid="prop-key"
+                >
                   <Icon name={atKey ? 'diamondFilled' : 'diamond'} size={13} />
                 </button>
                 <button className="icon-btn" title="Next keyframe" onClick={() => jump(1)}>
@@ -97,7 +132,12 @@ export function PropRow({ layer, comp, group, propKey, prop, label, noKeys }: Pr
                 </button>
               </span>
             ) : (
-              <button className="icon-btn kf-toggle" title="Animate: add a keyframe at the playhead" onClick={() => toggleStopwatch(layer.id, group, propKey)} data-testid="prop-animate">
+              <button
+                className={`icon-btn kf-toggle ${animated ? 'partly' : ''}`}
+                title={multi ? 'Animate on all selected layers: add a keyframe at the playhead' : 'Animate: add a keyframe at the playhead'}
+                onClick={() => toggleStopwatchMany(targets)}
+                data-testid="prop-animate"
+              >
                 <Icon name="diamond" size={13} />
               </button>
             ))}
@@ -107,7 +147,7 @@ export function PropRow({ layer, comp, group, propKey, prop, label, noKeys }: Pr
         </div>
       </div>
       {open && hasDetails && <PropDetails layer={layer} group={group} propKey={propKey} prop={prop} comp={comp} />}
-      {menu.anchor && <MenuPopover anchor={menu.anchor} onClose={menu.close} entries={entries} width={250} side={menu.anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} />}
+      {menu.anchor && <MenuPopover anchor={menu.anchor} onClose={menu.close} entries={entries} width={270} side={menu.anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} />}
     </div>
   );
 }

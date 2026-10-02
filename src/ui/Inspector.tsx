@@ -7,7 +7,6 @@ import {
   MATTE_MODES,
   type BlendMode,
   type Comp,
-  type Effect,
   type Layer,
   type LayerData,
   type Mask,
@@ -24,14 +23,15 @@ import {
   deleteLayers,
   distributeLayers,
   duplicateLayers,
-  moveEffect,
+  moveEffects,
   openComp,
   precompose,
-  removeEffect,
+  removeEffects,
   removeMask,
   removeTextAnimator,
   resetTransform,
-  setEffectEnabled,
+  selectLayers,
+  setEffectsEnabled,
   setLayerField,
   setMaskField,
   setParent,
@@ -51,48 +51,62 @@ import { GENERIC_FONTS, installedFonts } from './fonts';
 import { Icon, LAYER_ICON, type IconName } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
 import { EffectPicker } from './Pickers';
+import { commonContentKeys, commonOf, sharedEffects, type Member, type SharedEffect } from './multi';
 import { PropRow } from './PropRow';
 import { Field, Section } from './Section';
 
 type CompLite = Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
 
-/** The right-hand panel: edits whatever is selected, or the composition when nothing is. */
+/** The right-hand panel: edits whatever is selected (all of it, when several layers are), or the composition when nothing is. */
 export function Inspector() {
   const comp = useActiveComp();
   const selection = useApp((s) => s.selection);
-  const layer = comp.layers.find((l) => l.id === selection[0]) ?? null;
-  if (!layer) return <CompInspector comp={comp} />;
-  return <LayerInspector layer={layer} comp={comp} selectedCount={selection.filter((id) => comp.layers.some((l) => l.id === id)).length} />;
+  const layers = selection.map((id) => comp.layers.find((l) => l.id === id)).filter((l): l is Layer => !!l);
+  if (!layers.length) return <CompInspector comp={comp} />;
+  return <LayerInspector layers={layers} comp={comp} />;
 }
 
-function LayerInspector({ layer, comp, selectedCount }: { layer: Layer; comp: Comp; selectedCount: number }) {
+/** The same property on the layers after the first, for rows that edit all of them. */
+const peersOf = (layers: Layer[], pick: (l: Layer) => { group: PropGroup; prop: Prop | undefined }): Member[] =>
+  layers.slice(1).flatMap((layer) => {
+    const { group, prop } = pick(layer);
+    return prop ? [{ layer, group, prop }] : [];
+  });
+
+function LayerInspector({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+  const layer = layers[0];
   const d = layer.data;
-  const selection = useApp((s) => s.selection);
+  const multi = layers.length > 1;
+  const ids = layers.map((l) => l.id);
   return (
     <div className="inspector" data-testid="inspector">
-      <LayerHeader layer={layer} selectedCount={selectedCount} />
-      <AlignBar ids={selection} />
+      <LayerHeader layers={layers} />
+      <AlignBar ids={ids} />
 
-      <Section id="transform" title="Transform" actions={<ResetTransformButton id={layer.id} />}>
+      <Section id="transform" title="Transform" actions={<ResetTransformButton ids={ids} />}>
         {(['position', 'scale', 'rotation', 'opacity', 'anchor'] as const).map((k) => (
-          <PropRow key={k} layer={layer} comp={comp} group="transform" propKey={k} prop={layer.transform[k]} label={k === 'anchor' ? 'Anchor' : undefined} />
+          <PropRow key={k} layer={layer} comp={comp} group="transform" propKey={k} prop={layer.transform[k]} label={k === 'anchor' ? 'Anchor' : undefined} peers={peersOf(layers, (l) => ({ group: 'transform', prop: l.transform[k] }))} />
         ))}
       </Section>
 
-      <SourceSection layer={layer} comp={comp} />
-      <AnimateSection layer={layer} comp={comp} />
-      <EffectsSection layer={layer} comp={comp} />
-      {d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
-      {d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
-      {d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
-      <LayerSection layer={layer} comp={comp} />
+      <SourceSection layers={layers} comp={comp} />
+      <AnimateSection layers={layers} comp={comp} />
+      <EffectsSection layers={layers} comp={comp} />
+      {!multi && d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
+      {!multi && d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
+      {!multi && d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
+      <LayerSection layers={layers} comp={comp} />
+      {multi && <div className="hint compact multi-note">Keyframe curves, letter animators, masks and trim paths are edited one layer at a time. Click a layer's name above to focus it.</div>}
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ header */
 
-function LayerHeader({ layer, selectedCount }: { layer: Layer; selectedCount: number }) {
+function LayerHeader({ layers }: { layers: Layer[] }) {
+  const layer = layers[0];
+  const multi = layers.length > 1;
+  const ids = layers.map((l) => l.id);
   const [name, setName] = useState(layer.name);
   const menu = useAnchor();
   useEffect(() => setName(layer.name), [layer.id, layer.name]);
@@ -101,48 +115,62 @@ function LayerHeader({ layer, selectedCount }: { layer: Layer; selectedCount: nu
     if (n && n !== layer.name) setLayerField(layer.id, { name: n });
     else setName(layer.name);
   };
-  const ids = appStore.get().selection;
+  const allVisible = layers.every((l) => l.visible);
+  const allLocked = layers.every((l) => l.locked);
   const entries: MenuEntry[] = [
     { label: 'Duplicate', hint: 'Ctrl+D', icon: <Icon name="copy" />, run: () => duplicateLayers(ids) },
     { label: 'Split at playhead', hint: 'Ctrl+Shift+D', icon: <Icon name="layers" />, run: () => splitLayers(ids) },
     { label: 'Pre-compose…', hint: 'Ctrl+Shift+C', icon: <Icon name="comp" />, run: () => precompose(ids) },
-    { label: 'Reset transform', icon: <Icon name="reset" />, run: () => resetTransform([layer.id]), sep: true },
+    { label: 'Reset transform', icon: <Icon name="reset" />, run: () => resetTransform(ids), sep: true },
     { label: 'Delete', hint: 'Del', icon: <Icon name="trash" />, run: () => deleteLayers(ids), danger: true, sep: true },
   ];
   return (
     <div className="ins-header">
-      <span className={`type-badge ${layer.type}`}>
-        <Icon name={LAYER_ICON[layer.type]} size={14} />
-      </span>
-      <input
-        className="ins-name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') {
-            setName(layer.name);
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-        title="Rename layer"
-        data-testid="ins-name"
-        spellCheck={false}
-      />
-      <button className={`icon-btn ${layer.visible ? '' : 'off'}`} title={layer.visible ? 'Hide layer' : 'Show layer'} onClick={() => setLayerField(layer.id, { visible: !layer.visible })}>
-        <Icon name={layer.visible ? 'eye' : 'eyeOff'} />
+      {multi ? (
+        <>
+          <span className="type-badge multi">
+            <Icon name="layers" size={14} />
+          </span>
+          <span className="ins-name multi-title" data-testid="ins-multi-title">
+            {layers.length} layers
+          </span>
+        </>
+      ) : (
+        <>
+          <span className={`type-badge ${layer.type}`}>
+            <Icon name={LAYER_ICON[layer.type]} size={14} />
+          </span>
+          <input
+            className="ins-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') {
+                setName(layer.name);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            title="Rename layer"
+            data-testid="ins-name"
+            spellCheck={false}
+          />
+        </>
+      )}
+      <button className={`icon-btn ${allVisible ? '' : 'off'}`} title={allVisible ? 'Hide layer' : 'Show layer'} onClick={() => setLayerField(ids, { visible: !allVisible })} data-testid="ins-visible">
+        <Icon name={allVisible ? 'eye' : 'eyeOff'} />
       </button>
-      <button className={`icon-btn ${layer.locked ? 'on' : ''}`} title={layer.locked ? 'Unlock layer' : 'Lock layer'} onClick={() => setLayerField(layer.id, { locked: !layer.locked })}>
-        <Icon name={layer.locked ? 'lock' : 'unlock'} />
+      <button className={`icon-btn ${allLocked ? 'on' : ''}`} title={allLocked ? 'Unlock layer' : 'Lock layer'} onClick={() => setLayerField(ids, { locked: !allLocked })}>
+        <Icon name={allLocked ? 'lock' : 'unlock'} />
       </button>
       <button className="icon-btn" title="More" onClick={menu.toggle}>
         <Icon name="more" />
       </button>
       {menu.anchor && <MenuPopover anchor={menu.anchor} onClose={menu.close} entries={entries} side="left" />}
-      {selectedCount > 1 && <MultiBanner layer={layer} count={selectedCount} />}
-      {layer.type === 'precomp' && layer.data.type === 'precomp' && (
+      {multi && <MultiBanner layers={layers} />}
+      {layer.type === 'precomp' && !multi && layer.data.type === 'precomp' && (
         <button className="ins-open-comp" onClick={() => openComp((layer.data as Extract<LayerData, { type: 'precomp' }>).compId)}>
           Open composition <Icon name="arrowRight" size={12} />
         </button>
@@ -151,18 +179,27 @@ function LayerHeader({ layer, selectedCount }: { layer: Layer; selectedCount: nu
   );
 }
 
-/** Shown when several layers are selected: what applies to all of them, and a stagger control. */
-function MultiBanner({ layer, count }: { layer: Layer; count: number }) {
+/** Shown when several layers are selected: how editing works, a way back to one layer, and a stagger control. */
+function MultiBanner({ layers }: { layers: Layer[] }) {
   const [step, setStep] = useState(0.1);
+  const shown = layers.slice(0, 6);
   return (
     <div className="ins-multi" data-testid="multi-banner">
+      <div className="multi-chips">
+        {shown.map((l) => (
+          <button key={l.id} className="chip" title="Edit only this layer" onClick={() => selectLayers([l.id])}>
+            {l.name}
+          </button>
+        ))}
+        {layers.length > shown.length && <span className="more-count">+{layers.length - shown.length} more</span>}
+      </div>
       <div>
-        {count} layers selected. Editing <b>{layer.name}</b>. Align, distribute and animations you add apply to all of them.
+        You are editing all {layers.length} together. Where they differ a field says <b>Mixed</b>: drag it to move them all by the same amount, or type to set them all.
       </div>
       <div className="stagger-row">
         <span>Stagger entrances</span>
         <NumberField value={step} min={0} max={5} step={0.01} decimals={2} unit="s" onChange={setStep} title="Delay between one layer's entrance and the next" />
-        <button className="chip" onClick={() => staggerAnimations(appStore.get().selection, step)} data-testid="stagger">
+        <button className="chip" onClick={() => staggerAnimations(layers.map((l) => l.id), step)} data-testid="stagger">
           Apply
         </button>
       </div>
@@ -170,9 +207,9 @@ function MultiBanner({ layer, count }: { layer: Layer; count: number }) {
   );
 }
 
-function ResetTransformButton({ id }: { id: string }) {
+function ResetTransformButton({ ids }: { ids: string[] }) {
   return (
-    <button className="icon-btn" title="Reset position, scale, rotation and opacity" onClick={() => resetTransform([id])}>
+    <button className="icon-btn" title="Reset position, scale, rotation and opacity" onClick={() => resetTransform(ids)}>
       <Icon name="reset" size={13} />
     </button>
   );
@@ -250,14 +287,13 @@ function useTypingGesture() {
   };
 }
 
-function SourceSection({ layer, comp }: { layer: Layer; comp: Comp }) {
+type TextData = Extract<LayerData, { type: 'text' }>;
+type ShapeData = Extract<LayerData, { type: 'shape' }>;
+type SizedData = Extract<LayerData, { type: 'solid' | 'adjustment' | 'null' }>;
+
+/** Content properties a layer does not need to show right now (a stroke colour with no stroke). */
+function hiddenContentKeys(layer: Layer): Set<string> {
   const d = layer.data;
-  const typing = useTypingGesture();
-  const rows = (keys?: string[]) =>
-    Object.entries(layer.content)
-      .filter(([k]) => (keys ? keys.includes(k) : true))
-      .map(([k, p]) => <PropRow key={k} layer={layer} comp={comp} group="content" propKey={k} prop={p} />);
-  const set = (patch: Partial<LayerData>) => updateLayerData(layer.id, patch);
   const hidden = new Set<string>();
   if (d.type === 'text') {
     if (d.fill === false) hidden.add('fillColor');
@@ -268,25 +304,65 @@ function SourceSection({ layer, comp }: { layer: Layer; comp: Comp }) {
     if (!d.stroke) ['strokeColor', 'strokeWidth'].forEach((k) => hidden.add(k));
     ['trimStart', 'trimEnd', 'trimOffset'].forEach((k) => hidden.add(k));
   }
-  const visibleKeys = Object.keys(layer.content).filter((k) => !hidden.has(k));
-  const title = d.type === 'text' ? 'Text' : d.type === 'shape' ? 'Shape' : d.type === 'solid' ? 'Solid' : d.type === 'image' ? 'Image' : d.type === 'precomp' ? 'Composition' : d.type === 'adjustment' ? 'Adjustment' : 'Source';
+  return hidden;
+}
+
+const SOURCE_TITLE: Record<string, string> = { text: 'Text', shape: 'Shape', solid: 'Solid', image: 'Image', precomp: 'Composition', adjustment: 'Adjustment' };
+
+function SourceSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+  const layer = layers[0];
+  const d = layer.data;
+  const multi = layers.length > 1;
+  const ids = layers.map((l) => l.id);
+  const sameType = layers.every((l) => l.data.type === d.type);
+  const typing = useTypingGesture();
+  const set = (patch: Partial<LayerData>) => updateLayerData(ids, patch);
+
+  // a property is hidden only if no selected layer needs it
+  const hidden = new Set([...hiddenContentKeys(layer)].filter((k) => layers.every((l) => hiddenContentKeys(l).has(k))));
+  const keys = (multi ? commonContentKeys(layers) : Object.keys(layer.content)).filter((k) => !hidden.has(k));
+  const rows = keys.map((k) => (
+    <PropRow key={k} layer={layer} comp={comp} group="content" propKey={k} prop={layer.content[k]} peers={peersOf(layers, (l) => ({ group: 'content', prop: l.content[k] }))} />
+  ));
+  const title = multi && !sameType ? 'Shared' : (SOURCE_TITLE[d.type] ?? 'Source');
+  if (multi && !sameType && !rows.length) return null;
+
+  /** A toggle shared by several layers: lit only when every layer has it, and one click sets them all alike. */
+  const flag = (get: (l: Layer) => boolean, patch: (on: boolean) => Partial<LayerData>) => {
+    const all = layers.every(get);
+    return { on: all, onClick: () => set(patch(!all)) };
+  };
+  const fontOf = commonOf(layers, (l) => (l.data as TextData).font);
+  const alignOf = commonOf(layers, (l) => (l.data as TextData).align);
+  const capOf = commonOf(layers, (l) => (l.data as ShapeData).lineCap);
+  const joinOf = commonOf(layers, (l) => (l.data as ShapeData).lineJoin);
+  const widthOf = commonOf(layers, (l) => (l.data as SizedData).width);
+  const heightOf = commonOf(layers, (l) => (l.data as SizedData).height);
+  const anyStroke = layers.some((l) => (l.data as ShapeData).stroke);
 
   return (
     <Section id="source" title={title}>
-      {d.type === 'text' && (
+      {sameType && d.type === 'text' && (
         <>
-          <textarea
-            className="text-input"
-            value={d.text}
-            rows={2}
-            spellCheck={false}
-            {...typing}
-            onChange={(e) => set({ text: e.target.value })}
-            onKeyDown={(e) => e.stopPropagation()}
-            data-testid="text-input"
-          />
+          {!multi && (
+            <textarea
+              className="text-input"
+              value={d.text}
+              rows={2}
+              spellCheck={false}
+              {...typing}
+              onChange={(e) => set({ text: e.target.value })}
+              onKeyDown={(e) => e.stopPropagation()}
+              data-testid="text-input"
+            />
+          )}
           <Field label="Font">
-            <select className="mini-select wide" value={d.font} onChange={(e) => set({ font: e.target.value })} data-testid="font-select">
+            <select className="mini-select wide" value={fontOf.mixed ? '' : fontOf.value} onChange={(e) => set({ font: e.target.value })} data-testid="font-select">
+              {fontOf.mixed && (
+                <option value="" disabled>
+                  Mixed
+                </option>
+              )}
               <optgroup label="Everywhere">
                 {GENERIC_FONTS.map((f) => (
                   <option key={f.css} value={f.css}>
@@ -303,73 +379,69 @@ function SourceSection({ layer, comp }: { layer: Layer; comp: Comp }) {
                   ))}
                 </optgroup>
               )}
-              {![...GENERIC_FONTS, ...installedFonts()].some((f) => f.css === d.font) && <option value={d.font}>{d.font.split(',')[0].replace(/"/g, '')}</option>}
+              {!fontOf.mixed && ![...GENERIC_FONTS, ...installedFonts()].some((f) => f.css === fontOf.value) && <option value={fontOf.value}>{fontOf.value.split(',')[0].replace(/"/g, '')}</option>}
             </select>
           </Field>
           <Field label="Style">
             <div className="chips">
-              <Chip on={d.bold} onClick={() => set({ bold: !d.bold })} title="Bold">
+              <Chip {...flag((l) => (l.data as TextData).bold, (bold) => ({ bold }))} title="Bold">
                 <b>B</b>
               </Chip>
-              <Chip on={d.italic} onClick={() => set({ italic: !d.italic })} title="Italic">
+              <Chip {...flag((l) => (l.data as TextData).italic, (italic) => ({ italic }))} title="Italic">
                 <i>I</i>
               </Chip>
-              <Seg value={d.align} onChange={(align) => set({ align })} options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]} />
+              <Seg value={alignOf.mixed ? ('' as TextData['align']) : alignOf.value} onChange={(align) => set({ align })} options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]} />
             </div>
           </Field>
           <Field label="Paint">
             <div className="chips">
-              <Chip on={d.fill !== false} onClick={() => set({ fill: d.fill === false })}>
-                Fill
-              </Chip>
-              <Chip on={d.stroke} onClick={() => set({ stroke: !d.stroke })} testId="stroke-toggle">
+              <Chip {...flag((l) => (l.data as TextData).fill !== false, (fill) => ({ fill }))}>Fill</Chip>
+              <Chip {...flag((l) => (l.data as TextData).stroke, (stroke) => ({ stroke }))} testId="stroke-toggle">
                 Stroke
               </Chip>
             </div>
           </Field>
         </>
       )}
-      {d.type === 'shape' && (
+      {sameType && d.type === 'shape' && (
         <Field label="Paint">
           <div className="chips">
-            <Chip on={d.fill} onClick={() => set({ fill: !d.fill })}>
-              Fill
-            </Chip>
-            <Chip on={d.stroke} onClick={() => set({ stroke: !d.stroke })} testId="stroke-toggle">
+            <Chip {...flag((l) => (l.data as ShapeData).fill, (fill) => ({ fill }))}>Fill</Chip>
+            <Chip {...flag((l) => (l.data as ShapeData).stroke, (stroke) => ({ stroke }))} testId="stroke-toggle">
               Stroke
             </Chip>
           </div>
         </Field>
       )}
-      {d.type === 'shape' && d.stroke && (
+      {sameType && d.type === 'shape' && anyStroke && (
         <>
           <Field label="Line cap">
-            <Seg value={d.lineCap} onChange={(lineCap) => set({ lineCap })} options={[{ value: 'butt', label: 'Flat' }, { value: 'round', label: 'Round' }, { value: 'square', label: 'Square' }]} />
+            <Seg value={capOf.mixed ? ('' as ShapeData['lineCap']) : capOf.value} onChange={(lineCap) => set({ lineCap })} options={[{ value: 'butt', label: 'Flat' }, { value: 'round', label: 'Round' }, { value: 'square', label: 'Square' }]} />
           </Field>
           <Field label="Corners">
-            <Seg value={d.lineJoin} onChange={(lineJoin) => set({ lineJoin })} options={[{ value: 'miter', label: 'Sharp' }, { value: 'round', label: 'Round' }, { value: 'bevel', label: 'Bevel' }]} />
+            <Seg value={joinOf.mixed ? ('' as ShapeData['lineJoin']) : joinOf.value} onChange={(lineJoin) => set({ lineJoin })} options={[{ value: 'miter', label: 'Sharp' }, { value: 'round', label: 'Round' }, { value: 'bevel', label: 'Bevel' }]} />
           </Field>
         </>
       )}
-      {(d.type === 'solid' || d.type === 'adjustment' || d.type === 'null') && (
+      {sameType && (d.type === 'solid' || d.type === 'adjustment' || d.type === 'null') && (
         <Field label="Size">
           <span className="vec">
-            <NumberField value={d.width} min={1} max={16384} decimals={0} unit="px" onChange={(v) => set({ width: v })} />
+            <NumberField value={widthOf.value} mixed={widthOf.mixed} min={1} max={16384} decimals={0} unit="px" onChange={(v) => set({ width: v })} />
             <span className="x-sep">×</span>
-            <NumberField value={d.height} min={1} max={16384} decimals={0} unit="px" onChange={(v) => set({ height: v })} />
+            <NumberField value={heightOf.value} mixed={heightOf.mixed} min={1} max={16384} decimals={0} unit="px" onChange={(v) => set({ height: v })} />
           </span>
         </Field>
       )}
-      {d.type === 'precomp' && (
+      {!multi && d.type === 'precomp' && (
         <Field label="Contents">
           <button className="chip" onClick={() => openComp(d.compId)}>
             Open composition
           </button>
         </Field>
       )}
-      {d.type === 'image' && <div className="hint compact">Footage layer.</div>}
-      {d.type === 'adjustment' && <div className="hint compact">Effects on this layer change everything beneath it.</div>}
-      {rows(visibleKeys)}
+      {!multi && d.type === 'image' && <div className="hint compact">Footage layer.</div>}
+      {sameType && d.type === 'adjustment' && <div className="hint compact">Effects on {multi ? 'these layers' : 'this layer'} change everything beneath {multi ? 'them' : 'it'}.</div>}
+      {rows}
     </Section>
   );
 }
@@ -388,73 +460,91 @@ function TrimSection({ layer, comp }: { layer: Layer; comp: Comp }) {
 
 /* ------------------------------------------------------------------ effects */
 
-function EffectsSection({ layer, comp }: { layer: Layer; comp: Comp }) {
+function EffectsSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+  const layer = layers[0];
+  const multi = layers.length > 1;
   const picker = useAnchor();
   const namer = useAnchor();
+  const shared = sharedEffects(layers);
+  const partial = layers.reduce((n, l) => n + l.effects.length, 0) - shared.length * layers.length;
   return (
     <Section
       id="effects"
       title="Effects"
-      count={layer.effects.length}
+      count={shared.length}
       actions={
         <>
-          {layer.effects.length > 0 && (
+          {!multi && layer.effects.length > 0 && (
             <button className="icon-btn" onClick={namer.toggle} title="Save these effects as a look you can reuse" data-testid="save-look">
               <Icon name="heart" size={13} />
             </button>
           )}
-          <button className="add-chip" onClick={picker.toggle} data-testid="add-effect" title="Add an effect or a ready-made look">
+          <button className="add-chip" onClick={picker.toggle} data-testid="add-effect" title={multi ? 'Add an effect or look to every selected layer' : 'Add an effect or a ready-made look'}>
             <Icon name="plus" size={12} /> Add
           </button>
         </>
       }
     >
       {namer.anchor && <NamePrompt anchor={namer.anchor} title="Save these effects as a look" initial="My look" onSave={(name) => saveLookPreset(layer, name)} onClose={namer.close} />}
-      {layer.effects.length === 0 && (
+      {shared.length === 0 && (
         <div className="empty-hint">
-          Blur, glow, colour grading and more.
+          {multi ? 'No effect is on all of these layers.' : 'Blur, glow, colour grading and more.'}
           <button className="link" onClick={picker.toggle}>
             Add an effect
           </button>
         </div>
       )}
-      {layer.effects.map((fx, i) => (
-        <EffectCard key={fx.id} layer={layer} comp={comp} fx={fx} index={i} last={i === layer.effects.length - 1} />
+      {shared.map((item, i) => (
+        <EffectCard key={item.items[0].fx.id} comp={comp} shared={item} index={i} last={i === shared.length - 1} />
       ))}
+      {multi && partial > 0 && <div className="hint compact">{partial} other effect{partial === 1 ? ' is' : 's are'} on only some of these layers. Focus a layer to edit {partial === 1 ? 'it' : 'them'}.</div>}
       {picker.anchor && <EffectPicker layer={layer} anchor={picker.anchor} onClose={picker.close} />}
     </Section>
   );
 }
 
-function EffectCard({ layer, comp, fx, index, last }: { layer: Layer; comp: CompLite; fx: Effect; index: number; last: boolean }) {
+function EffectCard({ comp, shared, index, last }: { comp: CompLite; shared: SharedEffect; index: number; last: boolean }) {
+  const { layer, fx } = shared.items[0];
+  const multi = shared.items.length > 1;
   const open = useApp((s) => !s.folded[`fx:${fx.id}`]);
+  const targets = shared.items.map((i) => ({ layerId: i.layer.id, effectId: i.fx.id }));
+  const allOn = shared.items.every((i) => i.fx.enabled);
   const owner = fx.inst ? layer.anims.find((a) => a.id === fx.inst) : undefined;
   const tag = owner ? `from ${owner.name}` : fx.source?.startsWith('look:') ? 'look' : fx.source?.startsWith('style:') ? 'style' : '';
   return (
-    <div className={`card fx-card ${fx.enabled ? '' : 'disabled'}`} data-testid="fx-card">
+    <div className={`card fx-card ${allOn ? '' : 'disabled'}`} data-testid="fx-card">
       <div className="card-head">
         <button className="card-name" onClick={() => appStore.set((s) => ({ folded: { ...s.folded, [`fx:${fx.id}`]: open } }))}>
           <Icon name="chevronRight" size={11} className={`ac-chevron ${open ? 'open' : ''}`} />
           <span>{getEffectDef(fx.type)?.name ?? fx.type}</span>
-          {tag && <small className="tag">{tag}</small>}
+          {tag && !multi && <small className="tag">{tag}</small>}
+          {multi && <small className="tag">× {shared.items.length} layers</small>}
         </button>
-        <button className="icon-btn" title="Move up" disabled={index === 0} onClick={() => moveEffect(layer.id, fx.id, -1)}>
+        <button className="icon-btn" title="Move up" disabled={index === 0} onClick={() => moveEffects(targets, -1)}>
           <Icon name="chevronDown" size={12} style={{ transform: 'rotate(180deg)' }} />
         </button>
-        <button className="icon-btn" title="Move down" disabled={last} onClick={() => moveEffect(layer.id, fx.id, 1)}>
+        <button className="icon-btn" title="Move down" disabled={last} onClick={() => moveEffects(targets, 1)}>
           <Icon name="chevronDown" size={12} />
         </button>
-        <button className={`icon-btn ${fx.enabled ? '' : 'off'}`} title={fx.enabled ? 'Turn off' : 'Turn on'} onClick={() => setEffectEnabled(layer.id, fx.id, !fx.enabled)} data-testid="fx-enable">
-          <Icon name={fx.enabled ? 'eye' : 'eyeOff'} size={13} />
+        <button className={`icon-btn ${allOn ? '' : 'off'}`} title={allOn ? 'Turn off' : 'Turn on'} onClick={() => setEffectsEnabled(targets, !allOn)} data-testid="fx-enable">
+          <Icon name={allOn ? 'eye' : 'eyeOff'} size={13} />
         </button>
-        <button className="icon-btn" title="Remove effect" onClick={() => removeEffect(layer.id, fx.id)} data-testid="fx-remove">
+        <button className="icon-btn" title="Remove effect" onClick={() => removeEffects(targets)} data-testid="fx-remove">
           <Icon name="close" size={12} />
         </button>
       </div>
       {open && (
         <div className="card-body">
           {Object.entries(fx.props).map(([k, p]) => (
-            <PropRow key={k} layer={layer} comp={comp} group={`fx:${fx.id}` as PropGroup} propKey={k} prop={p} />
+            <PropRow
+              key={k}
+              layer={layer}
+              comp={comp}
+              group={`fx:${fx.id}` as PropGroup}
+              propKey={k}
+              prop={p}
+              peers={shared.items.slice(1).flatMap((i) => (i.fx.props[k] ? [{ layer: i.layer, group: `fx:${i.fx.id}` as PropGroup, prop: i.fx.props[k] }] : []))}
+            />
           ))}
         </div>
       )}
@@ -608,14 +698,25 @@ function MaskCard({ layer, comp, mask }: { layer: Layer; comp: CompLite; mask: M
 
 /* ------------------------------------------------------------------ layer switches & timing */
 
-function LayerSection({ layer, comp }: { layer: Layer; comp: Comp }) {
+function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+  const layer = layers[0];
+  const multi = layers.length > 1;
+  const ids = layers.map((l) => l.id);
   const index = comp.layers.findIndex((l) => l.id === layer.id);
   const parents = comp.layers.filter((l) => l.id !== layer.id);
   const step = 1 / comp.fps;
+  const blend = commonOf(layers, (l) => l.blend);
+  const allBlur = layers.every((l) => l.motionBlur);
+  const allSolo = layers.every((l) => l.solo);
   return (
     <Section id="layer" title="Layer" defaultFolded>
       <Field label="Blend">
-        <select className="mini-select wide" value={layer.blend} onChange={(e) => setLayerField(layer.id, { blend: e.target.value as BlendMode })} data-testid="ins-blend">
+        <select className="mini-select wide" value={blend.mixed ? '' : blend.value} onChange={(e) => setLayerField(ids, { blend: e.target.value as BlendMode })} data-testid="ins-blend">
+          {blend.mixed && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
           {BLEND_MODES.map((b) => (
             <option key={b.id} value={b.id}>
               {b.label}
@@ -623,38 +724,42 @@ function LayerSection({ layer, comp }: { layer: Layer; comp: Comp }) {
           ))}
         </select>
       </Field>
-      <Field label="Matte" title="Use the layer above as a matte">
-        <select className="mini-select wide" disabled={index === 0} value={layer.matte} onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
-          {MATTE_MODES.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Parent" title="This layer follows its parent's movement">
-        <select className="mini-select wide" value={layer.parentId ?? ''} onChange={(e) => setParent(layer.id, e.target.value || null)}>
-          <option value="">None</option>
-          {parents.map((p) => (
-            <option key={p.id} value={p.id}>
-              {comp.layers.indexOf(p) + 1}. {p.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Timing">
-        <span className="vec">
-          <NumberField value={layer.inPoint} min={0} step={step} decimals={2} unit="s" onChange={(v) => trimLayer(layer.id, 'in', v)} title="First visible moment" />
-          <span className="x-sep">→</span>
-          <NumberField value={layer.outPoint} min={0} step={step} decimals={2} unit="s" onChange={(v) => trimLayer(layer.id, 'out', v)} title="Last visible moment" />
-        </span>
-      </Field>
+      {!multi && (
+        <>
+          <Field label="Matte" title="Use the layer above as a matte">
+            <select className="mini-select wide" disabled={index === 0} value={layer.matte} onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
+              {MATTE_MODES.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Parent" title="This layer follows its parent's movement">
+            <select className="mini-select wide" value={layer.parentId ?? ''} onChange={(e) => setParent(layer.id, e.target.value || null)}>
+              <option value="">None</option>
+              {parents.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {comp.layers.indexOf(p) + 1}. {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Timing">
+            <span className="vec">
+              <NumberField value={layer.inPoint} min={0} step={step} decimals={2} unit="s" onChange={(v) => trimLayer(layer.id, 'in', v)} title="First visible moment" />
+              <span className="x-sep">→</span>
+              <NumberField value={layer.outPoint} min={0} step={step} decimals={2} unit="s" onChange={(v) => trimLayer(layer.id, 'out', v)} title="Last visible moment" />
+            </span>
+          </Field>
+        </>
+      )}
       <Field label="Switches">
         <div className="chips">
-          <Chip on={layer.motionBlur} onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} title="Motion blur (also needs Motion Blur on in the timeline)">
+          <Chip on={allBlur} onClick={() => setLayerField(ids, { motionBlur: !allBlur })} title="Motion blur (also needs Motion Blur on in the timeline)">
             Motion blur
           </Chip>
-          <Chip on={layer.solo} onClick={() => setLayerField(layer.id, { solo: !layer.solo })} title="Show only soloed layers">
+          <Chip on={allSolo} onClick={() => setLayerField(ids, { solo: !allSolo })} title="Show only soloed layers">
             Solo
           </Chip>
         </div>

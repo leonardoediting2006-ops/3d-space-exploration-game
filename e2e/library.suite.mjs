@@ -46,7 +46,7 @@ try {
   await page.click('.tabs >> text=Library');
   await page.waitForSelector('[data-testid=library]');
   const cats = await page.locator('.lib-cats button').count();
-  check('library lists all seven categories', cats === 7, cats);
+  check('library lists all seven categories plus My presets', cats === 8, cats);
   await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(OUT, 'library-text-styles.png') });
   const thumbsDrawn = await page.evaluate(() => [...document.querySelectorAll('.tpl-thumb')].filter((c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 0; i < d.length; i += 40) if (d[i + 3] > 0 && d[i] > 60) return true; return false; }).length);

@@ -3092,6 +3092,58 @@ kbd {
   right: 8px;
 }
 
+/* ---------------------------------------------------------------- editing several layers at once */
+.mixed-text {
+  color: var(--faint);
+  font-style: italic;
+}
+.num.mixed,
+.slider.mixed {
+  color: var(--faint);
+}
+.swatch-btn.mixed {
+  background: repeating-linear-gradient(135deg, #5b5f6b 0 5px, #34363e 5px 10px);
+}
+.ease-btn.mixed {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.kf-toggle.partly {
+  color: var(--key);
+  opacity: 0.75;
+}
+.type-badge.multi {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ins-name.multi-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  cursor: default;
+}
+.multi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.multi-chips .chip {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.multi-chips .more-count {
+  align-self: center;
+  color: var(--faint);
+  font-size: 11px;
+}
+.multi-note {
+  margin: 10px 12px 16px;
+}
+
 /* ---------------------------------------------------------------- preset import / export / sync */
 .preset-bar {
   margin: 0 0 10px;

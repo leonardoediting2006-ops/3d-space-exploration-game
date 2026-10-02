@@ -11,9 +11,15 @@ export function useTimeIf(active: boolean): number {
 
 const fmt = (v: number, decimals: number) => (decimals <= 0 ? String(Math.round(v)) : v.toFixed(decimals));
 
+/** How an edit should reach several layers that disagree: 'set' makes them all equal, 'delta' moves each by the same amount. */
+export type EditHow = 'set' | 'delta';
+
 interface NumberFieldProps {
   value: number;
-  onChange: (v: number) => void;
+  /** `how` matters only when this field edits several layers at once (see EditHow). */
+  onChange: (v: number, how?: EditHow) => void;
+  /** The layers being edited have different values: show "Mixed" instead of one of them. */
+  mixed?: boolean;
   step?: number;
   min?: number;
   max?: number;
@@ -27,7 +33,7 @@ interface NumberFieldProps {
  * A scrubbable number: drag horizontally to change it, click to type. Shift is ×10, Alt ×0.1.
  * Each drag is one undo step.
  */
-export function NumberField({ value, onChange, step = 1, min, max, decimals = 1, unit = '', title, className }: NumberFieldProps) {
+export function NumberField({ value, onChange, mixed, step = 1, min, max, decimals = 1, unit = '', title, className }: NumberFieldProps) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const drag = useRef<{ x: number; start: number; moved: boolean } | null>(null);
@@ -38,7 +44,7 @@ export function NumberField({ value, onChange, step = 1, min, max, decimals = 1,
       setEditing(false);
       if (!apply) return;
       const v = parseFloat(text.replace(',', '.'));
-      if (Number.isFinite(v)) onChange(clampV(v));
+      if (Number.isFinite(v)) onChange(clampV(v), 'set');
     };
     return (
       <input
@@ -59,7 +65,7 @@ export function NumberField({ value, onChange, step = 1, min, max, decimals = 1,
 
   return (
     <span
-      className={`num ${className ?? ''}`}
+      className={`num ${mixed ? 'mixed' : ''} ${className ?? ''}`}
       title={title ?? 'Drag to scrub, click to type'}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
@@ -77,7 +83,7 @@ export function NumberField({ value, onChange, step = 1, min, max, decimals = 1,
         }
         const mult = e.shiftKey ? 10 : e.altKey ? 0.1 : 1;
         const v = clampV(d.start + dx * step * mult);
-        onChange(decimals <= 0 ? Math.round(v) : Math.round(v * 10 ** (decimals + 1)) / 10 ** (decimals + 1));
+        onChange(decimals <= 0 ? Math.round(v) : Math.round(v * 10 ** (decimals + 1)) / 10 ** (decimals + 1), 'delta');
       }}
       onPointerUp={() => {
         const d = drag.current;
@@ -85,13 +91,13 @@ export function NumberField({ value, onChange, step = 1, min, max, decimals = 1,
         if (!d) return;
         if (d.moved) endGesture();
         else {
-          setText(fmt(value, decimals));
+          setText(mixed ? '' : fmt(value, decimals));
           setEditing(true);
         }
       }}
     >
-      {fmt(value, decimals)}
-      {unit && <span className="unit">{unit}</span>}
+      {mixed ? <span className="mixed-text">Mixed</span> : fmt(value, decimals)}
+      {unit && !mixed && <span className="unit">{unit}</span>}
     </span>
   );
 }
@@ -105,7 +111,8 @@ export const hexToRgb = (h: string): [number, number, number] => {
 
 interface SliderFieldProps {
   value: number;
-  onChange: (v: number) => void;
+  onChange: (v: number, how?: EditHow) => void;
+  mixed?: boolean;
   min: number;
   max: number;
   step?: number;
@@ -119,7 +126,7 @@ interface SliderFieldProps {
  * A bounded number drawn as a filled bar: drag to set it, click to type, arrow keys to nudge.
  * Short ranges map the bar to the whole range; very wide ones scrub relatively so small values stay reachable.
  */
-export function SliderField({ value, onChange, min, max, step = 1, decimals = 1, unit = '', title, className }: SliderFieldProps) {
+export function SliderField({ value, onChange, mixed, min, max, step = 1, decimals = 1, unit = '', title, className }: SliderFieldProps) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const track = useRef<HTMLDivElement>(null);
@@ -134,7 +141,7 @@ export function SliderField({ value, onChange, min, max, step = 1, decimals = 1,
       setEditing(false);
       if (!apply) return;
       const v = parseFloat(text.replace(',', '.'));
-      if (Number.isFinite(v)) onChange(clampV(v));
+      if (Number.isFinite(v)) onChange(clampV(v), 'set');
     };
     return (
       <input
@@ -156,13 +163,13 @@ export function SliderField({ value, onChange, min, max, step = 1, decimals = 1,
   return (
     <div
       ref={track}
-      className={`slider ${className ?? ''}`}
+      className={`slider ${mixed ? 'mixed' : ''} ${className ?? ''}`}
       tabIndex={0}
       role="slider"
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuenow={value}
-      title={title ?? 'Drag to change, click to type. Hold Alt for fine control.'}
+      title={mixed ? 'The selected layers differ. Drag or type to set them all to one value; arrow keys nudge each.' : (title ?? 'Drag to change, click to type. Hold Alt for fine control.')}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -182,7 +189,7 @@ export function SliderField({ value, onChange, min, max, step = 1, decimals = 1,
         if (e.altKey) v = d.start + (dx / w) * (max - min) * 0.1;
         else if (absolute) v = min + ((e.clientX - track.current!.getBoundingClientRect().left) / w) * (max - min);
         else v = d.start + dx * step * (e.shiftKey ? 10 : 1);
-        onChange(round(clampV(Math.round(v / step) * step)));
+        onChange(round(clampV(Math.round(v / step) * step)), 'set');
       }}
       onPointerUp={() => {
         const d = drag.current;
@@ -190,7 +197,7 @@ export function SliderField({ value, onChange, min, max, step = 1, decimals = 1,
         if (!d) return;
         if (d.moved) endGesture();
         else {
-          setText(fmt(value, decimals));
+          setText(mixed ? '' : fmt(value, decimals));
           setEditing(true);
         }
       }}
@@ -199,24 +206,30 @@ export function SliderField({ value, onChange, min, max, step = 1, decimals = 1,
         if (!dir) return;
         e.preventDefault();
         e.stopPropagation();
-        onChange(round(clampV(value + dir * step * (e.shiftKey ? 10 : 1))));
+        onChange(round(clampV(value + dir * step * (e.shiftKey ? 10 : 1))), 'delta');
       }}
     >
-      <i className="slider-fill" style={{ width: `${ratio * 100}%` }} />
+      {!mixed && <i className="slider-fill" style={{ width: `${ratio * 100}%` }} />}
       <span className="slider-text">
-        {fmt(value, decimals)}
-        {unit && <span className="unit">{unit}</span>}
+        {mixed ? <span className="mixed-text">Mixed</span> : fmt(value, decimals)}
+        {unit && !mixed && <span className="unit">{unit}</span>}
       </span>
     </div>
   );
 }
 
 /** A colour swatch that opens a full picker. */
-export function ColorField({ value, onChange, className }: { value: number[]; onChange: (c: [number, number, number]) => void; className?: string }) {
+export function ColorField({ value, onChange, mixed, className }: { value: number[]; onChange: (c: [number, number, number]) => void; mixed?: boolean; className?: string }) {
   const { anchor, toggle, close } = useAnchor();
   return (
     <>
-      <button className={`swatch-btn ${className ?? ''}`} style={{ background: rgbToHex(value) }} title={`${rgbToHex(value)} — click to change`} onClick={toggle} data-testid="color-swatch" />
+      <button
+        className={`swatch-btn ${mixed ? 'mixed' : ''} ${className ?? ''}`}
+        style={mixed ? undefined : { background: rgbToHex(value) }}
+        title={mixed ? 'The selected layers have different colours — click to set them all' : `${rgbToHex(value)} — click to change`}
+        onClick={toggle}
+        data-testid="color-swatch"
+      />
       {anchor && (
         <Popover anchor={anchor} onClose={close} width={232} side={anchor.left > window.innerWidth / 2 ? 'left' : 'bottom'} className="color-pop">
           <ColorPicker value={value} onChange={onChange} />

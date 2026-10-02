@@ -4,7 +4,7 @@ import { baseValue, setKeyAt } from '../core/interp';
 import { apply } from '../core/math';
 import { layerPolygon, worldMatrix, layerMap, localMatrix } from '../render/geometry';
 import * as A from './actions';
-import { activeComp, appStore, beginGesture, endGesture, redo, resetHistory, timeStore, undo } from './store';
+import { activeComp, appStore, batch, beginGesture, endGesture, redo, resetHistory, timeStore, undo } from './store';
 
 // The store and actions run in Node here; playback is the only part that needs a frame scheduler.
 globalThis.requestAnimationFrame ??= (() => 0) as typeof requestAnimationFrame;
@@ -489,3 +489,127 @@ describe('Inspector actions', () => {
     expect(starts()).toEqual(first);
   });
 });
+
+describe('editing several layers at once', () => {
+  const make = () => {
+    const a = A.addShape('rect', [100, 60], [200, 300]);
+    const b = A.addShape('rect', [100, 60], [400, 300]);
+    const c = A.addShape('rect', [100, 60], [600, 300]);
+    return { a, b, c };
+  };
+  const layer = (id: string) => layers().find((l) => l.id === id)!;
+  const target = (layerId: string, key = 'rotation') => ({ layerId, group: 'transform' as const, key });
+
+  it('the stopwatch animates the layers that are not and leaves the rest', () => {
+    const { a, b, c } = make();
+    timeAt(1);
+    A.toggleStopwatch(a, 'transform', 'rotation');
+    expect(layer(a).transform.rotation.keys).toHaveLength(1);
+    A.toggleStopwatchMany([target(a), target(b), target(c)]);
+    expect(layer(a).transform.rotation.keys).toHaveLength(1);
+    expect(layer(b).transform.rotation.keys).toHaveLength(1);
+    expect(layer(c).transform.rotation.keys).toHaveLength(1);
+    // now that all are animated, the same click stops them all
+    A.toggleStopwatchMany([target(a), target(b), target(c)]);
+    for (const id of [a, b, c]) expect(layer(id).transform.rotation.keys).toHaveLength(0);
+  });
+
+  it('the key button adds a key where missing, and removes only when every layer has one', () => {
+    const { a, b } = make();
+    timeAt(1);
+    A.toggleStopwatchMany([target(a), target(b)]);
+    timeAt(2);
+    A.toggleKeyHere(a, 'transform', 'rotation');
+    expect(layer(a).transform.rotation.keys).toHaveLength(2);
+    expect(layer(b).transform.rotation.keys).toHaveLength(1);
+    A.toggleKeyHereMany([target(a), target(b)]);
+    expect(layer(a).transform.rotation.keys).toHaveLength(2);
+    expect(layer(b).transform.rotation.keys).toHaveLength(2);
+    A.toggleKeyHereMany([target(a), target(b)]);
+    expect(layer(a).transform.rotation.keys).toHaveLength(1);
+    expect(layer(b).transform.rotation.keys).toHaveLength(1);
+  });
+
+  it('writes a different value to each layer as one undo step', () => {
+    const { a, b, c } = make();
+    const before = appStore.get().undoCount;
+    A.setManyProps([
+      { layerId: a, group: 'transform', key: 'rotation', value: 10 },
+      { layerId: b, group: 'transform', key: 'rotation', value: 20 },
+      { layerId: c, group: 'transform', key: 'rotation', value: 30 },
+    ]);
+    expect(appStore.get().undoCount).toBe(before + 1);
+    expect([a, b, c].map((id) => layer(id).transform.rotation.value)).toEqual([10, 20, 30]);
+    undo();
+    expect([a, b, c].map((id) => layer(id).transform.rotation.value)).toEqual([0, 0, 0]);
+  });
+
+  it('resets every layer, each to its own default, in one step', () => {
+    const { a, b } = make();
+    A.setPropValue(a, 'transform', 'opacity', 40);
+    A.setPropValue(b, 'transform', 'opacity', 70);
+    const before = appStore.get().undoCount;
+    A.resetProps([target(a, 'opacity'), target(b, 'opacity')]);
+    expect(layer(a).transform.opacity.value).toBe(100);
+    expect(layer(b).transform.opacity.value).toBe(100);
+    expect(appStore.get().undoCount).toBe(before + 1);
+  });
+
+  it('changes wiggle, loop and link on all of them', () => {
+    const { a, b } = make();
+    A.setWiggleMany([target(a, 'position'), target(b, 'position')], { freq: 3, amp: 12, seed: 5 });
+    expect(layer(a).transform.position.wiggle?.amp).toBe(12);
+    expect(layer(b).transform.position.wiggle?.seed).toBe(5);
+    A.setWiggleMany([target(a, 'position'), target(b, 'position')], null);
+    expect(layer(b).transform.position.wiggle).toBeUndefined();
+    A.setLoopMany([target(a), target(b)], 'pingpong');
+    expect(layer(a).transform.rotation.loop).toBe('pingpong');
+    A.setPropLinkMany([target(a, 'scale'), target(b, 'scale')], true);
+    expect(layer(b).transform.scale.link).toBe(true);
+  });
+
+  it('switches and layer settings apply to every layer in one step', () => {
+    const { a, b, c } = make();
+    const before = appStore.get().undoCount;
+    A.setLayerField([a, b], { visible: false, blend: 'multiply' });
+    expect(appStore.get().undoCount).toBe(before + 1);
+    expect([a, b, c].map((id) => layer(id).visible)).toEqual([false, false, true]);
+    expect(layer(b).blend).toBe('multiply');
+    expect(layer(c).blend).toBe('normal');
+    A.updateLayerData([a, c], { fill: false });
+    expect((layer(a).data as { fill: boolean }).fill).toBe(false);
+    expect((layer(b).data as { fill: boolean }).fill).toBe(true);
+  });
+
+  it('adds, switches, reorders and removes the same effect on several layers', () => {
+    const { a, b } = make();
+    A.addEffect([a, b], 'gaussianBlur');
+    A.addEffect([a, b], 'glow');
+    const ids = (type: string) => [a, b].map((id) => ({ layerId: id, effectId: layer(id).effects.find((e) => e.type === type)!.id }));
+    A.setEffectsEnabled(ids('glow'), false);
+    expect([a, b].map((id) => layer(id).effects[1].enabled)).toEqual([false, false]);
+    A.moveEffects(ids('glow'), -1);
+    expect([a, b].map((id) => layer(id).effects[0].type)).toEqual(['glow', 'glow']);
+    A.removeEffects(ids('gaussianBlur'));
+    expect([a, b].map((id) => layer(id).effects.map((e) => e.type))).toEqual([['glow'], ['glow']]);
+  });
+
+  it('batch() makes a run of edits one undo step', () => {
+    const { a, b } = make();
+    const before = appStore.get().undoCount;
+    batch(() => {
+      A.setPropValue(a, 'transform', 'rotation', 5);
+      A.setPropValue(b, 'transform', 'rotation', 6);
+      A.setLayerField(a, { solo: true });
+    });
+    expect(appStore.get().undoCount).toBe(before + 1);
+    undo();
+    expect(layer(a).transform.rotation.value).toBe(0);
+    expect(layer(b).transform.rotation.value).toBe(0);
+    expect(layer(a).solo).toBe(false);
+  });
+});
+
+function timeAt(t: number): void {
+  timeStore.set({ t });
+}

@@ -182,12 +182,12 @@ export function EaseEditor({ keyId, x, y, onClose }: { keyId: string; x: number;
 }
 
 /** A small curve button that opens an `EasePanel`. */
-export function EaseButton({ ease, onChange, title, allowHold = false }: { ease: Ease; onChange: (e: Ease) => void; title: string; allowHold?: boolean }) {
+export function EaseButton({ ease, onChange, title, allowHold = false, mixed = false }: { ease: Ease; onChange: (e: Ease) => void; title: string; allowHold?: boolean; mixed?: boolean }) {
   const { anchor, toggle, close } = useAnchor();
   return (
     <>
-      <button className="ease-btn" title={`${title} — click to edit the curve`} onClick={toggle} data-testid="ease-button">
-        <EaseThumb ease={ease} size={26} />
+      <button className={`ease-btn ${mixed ? 'mixed' : ''}`} title={mixed ? `${title} — the layers differ; pick a curve to set them all` : `${title} — click to edit the curve`} onClick={toggle} data-testid="ease-button">
+        {mixed ? <span className="mixed-text">Mixed</span> : <EaseThumb ease={ease} size={26} />}
         <Icon name="chevronDown" size={10} />
       </button>
       {anchor && (

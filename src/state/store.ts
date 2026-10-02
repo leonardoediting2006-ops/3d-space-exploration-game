@@ -191,6 +191,17 @@ export function commit(edit: (draft: Project) => void): void {
   appStore.set({ project: next, dirty: true, undoCount: past.length, redoCount: future.length });
 }
 
+/** Run several edits as one undo step (a no-op wrapper when a gesture is already open). */
+export function batch(run: () => void): void {
+  if (gestureOpen) return run();
+  beginGesture();
+  try {
+    run();
+  } finally {
+    endGesture();
+  }
+}
+
 export function beginGesture(): void {
   gestureOpen = true;
   gestureSnapshot = appStore.get().project;
