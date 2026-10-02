@@ -1,6 +1,7 @@
 import { evalNum, evalProp, evalVec } from '../core/interp';
 import { pathBounds, pathToPath2D, pointCount } from '../core/path';
 import { apply, invert, mul, rotation, scaling, translate, type Mat } from '../core/math';
+import { planeHomography, projectLayerPoint, sceneAt, unprojectToLayer, worldModel } from '../core/scene3d';
 import type { Comp, Layer, Project, Vec2 } from '../core/types';
 
 export interface Rect {
@@ -81,6 +82,8 @@ export function localBounds(project: Project, layer: Layer, t: number): Rect | n
       return a ? { x: 0, y: 0, w: a.width, h: a.height } : { x: 0, y: 0, w: 200, h: 200 };
     }
     case 'audio':
+    case 'camera':
+    case 'light':
       return null;
     case 'precomp': {
       const c = project.comps[d.compId];
@@ -98,10 +101,24 @@ export function rectCorners(r: Rect): Vec2[] {
   ];
 }
 
+/** Is the layer placed in 3D space (so its outline is a projection, not a 2D transform)? */
+export const isThreeD = (l: Layer): boolean => !!l.threeD && l.type !== 'camera' && l.type !== 'light' && l.type !== 'audio';
+
+/** Layer coordinates → screen for a 3D layer at time t, seen through the composition's camera. */
+export function layerProjection(comp: Comp, layer: Layer, t: number): ((p: Vec2) => Vec2 | null) {
+  const H = planeHomography(sceneAt(comp, t).view, worldModel(layer, t, layerMap(comp)));
+  return (p) => projectLayerPoint(H, p[0], p[1]);
+}
+
 /** Layer outline in composition space. */
 export function layerPolygon(project: Project, comp: Comp, layer: Layer, t: number): Vec2[] | null {
   const b = localBounds(project, layer, t);
   if (!b) return null;
+  if (isThreeD(layer)) {
+    const proj = layerProjection(comp, layer, t);
+    const pts = rectCorners(b).map(proj);
+    return pts.every((p): p is Vec2 => !!p) ? pts : null;
+  }
   const m = worldMatrix(layer, t, layerMap(comp));
   return rectCorners(b).map((p) => apply(m, p));
 }
@@ -119,12 +136,21 @@ export function parentWorld(layer: Layer, t: number, byId: Map<string, Layer>): 
 
 
 /** Is comp-space point p inside the layer's visible shape? Ellipses are tested exactly. */
-export function hitTestLayer(project: Project, layer: Layer, t: number, byId: Map<string, Layer>, p: Vec2): boolean {
+export function hitTestLayer(project: Project, layer: Layer, t: number, byId: Map<string, Layer>, p: Vec2, comp?: Comp): boolean {
   const b = localBounds(project, layer, t);
   if (!b) return false;
-  const inv = invert(worldMatrix(layer, t, byId));
-  if (!inv) return false;
-  const [x, y] = apply(inv, p);
+  let x: number;
+  let y: number;
+  if (comp && isThreeD(layer)) {
+    // a 3D layer: find where on its plane the pointer lands
+    const hit = unprojectToLayer(planeHomography(sceneAt(comp, t).view, worldModel(layer, t, byId)), p[0], p[1]);
+    if (!hit) return false;
+    [x, y] = hit;
+  } else {
+    const inv = invert(worldMatrix(layer, t, byId));
+    if (!inv) return false;
+    [x, y] = apply(inv, p);
+  }
   if (x < b.x || y < b.y || x > b.x + b.w || y > b.y + b.h) return false;
   if (layer.data.type === 'shape' && layer.data.shape === 'path') {
     const v = evalProp(layer.content.path, t) as number[];

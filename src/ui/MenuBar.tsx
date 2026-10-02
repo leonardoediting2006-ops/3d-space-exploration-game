@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   addAdjustment,
+  addCamera,
+  addLight,
   addNull,
   addStarterMask,
   addShape,
@@ -19,6 +21,7 @@ import {
   precompose,
   saveProjectFile,
   selectAllLayers,
+  setLayerField,
   setTime,
   sequenceLayers,
   setWorkArea,
@@ -42,6 +45,13 @@ interface Entry {
 }
 
 export const OPEN_PROJECT_EVENT = 'ks:open-project';
+
+/** Turn 3D on for the selected layers, or off if they all have it. */
+function toggle3D(ids: string[]): void {
+  const layers = activeComp().layers.filter((l) => ids.includes(l.id) && l.type !== 'audio' && l.type !== 'camera' && l.type !== 'light');
+  const on = layers.length > 0 && layers.every((l) => l.threeD);
+  setLayerField(layers.map((l) => l.id), { threeD: !on });
+}
 
 export function MenuBar() {
   const [open, setOpen] = useState<string | null>(null);
@@ -123,6 +133,12 @@ export function MenuBar() {
       { label: 'New Text Layer', run: () => addText('Text', center()) },
       { label: 'New Null Object', run: addNull },
       { label: 'New Adjustment Layer', run: addAdjustment },
+      { label: 'New Camera', run: addCamera },
+      { label: 'New Light: Spot', run: () => addLight('spot') },
+      { label: 'New Light: Point', run: () => addLight('point') },
+      { label: 'New Light: Parallel', run: () => addLight('parallel') },
+      { label: 'New Light: Ambient', run: () => addLight('ambient') },
+      { label: '3D Layer', checked: hasSel && selection.every((id) => activeComp().layers.find((l) => l.id === id)?.threeD), run: () => toggle3D(selection), disabled: !hasSel },
       { sep: true },
       { label: 'New Mask: Rectangle', run: () => addStarterMask(selection[0], 'rect'), disabled: selection.length !== 1 },
       { label: 'New Mask: Ellipse', run: () => addStarterMask(selection[0], 'ellipse'), disabled: selection.length !== 1 },

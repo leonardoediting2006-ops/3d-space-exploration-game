@@ -1,12 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { baseValue, evalProp } from '../core/interp';
+import { baseValue, evalNum, evalProp, evalVec } from '../core/interp';
 import { apply, applyVec, clamp, invert, radToDeg, type Mat } from '../core/math';
 import { corner, ellipsePath, fromPoints, isSmooth, nearestOnPath, rectPath, smoothVertex, toPoints, type PathPt } from '../core/path';
 import type { Comp, Keyframe, Layer, Project, PropGroup, Vec2 } from '../core/types';
 import { renderComp } from '../render/renderer';
 import { missingFrames, prepareFrame } from '../render/video';
+import { depthOf, planeHomography, projectLayerPoint, sceneAt, screenToWorldAtZ, toView, worldModel } from '../core/scene3d';
+import { LIGHT_KINDS } from '../core/types';
+import { point4 } from '../core/math3';
 import {
   hitTestLayer,
+  isThreeD,
   layerMap,
   layerPolygon,
   localBounds,
@@ -60,6 +64,8 @@ const ROT_OFFSET = 30;
 const SCALE_CURSORS = ['nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize', 'ew-resize'];
 
 interface Gizmo {
+  /** A 3D layer: the outline is its projection, and it can be moved but not scaled or rotated here. */
+  three?: boolean;
   poly: Vec2[];
   handles: Vec2[]; // TL, T, TR, R, BR, B, BL, L (comp space)
   rot: Vec2;
@@ -82,6 +88,14 @@ function computeGizmo(project: Project, comp: Comp, layer: Layer, t: number, zoo
     [b.x, b.y + b.h],
     [b.x, b.y + b.h / 2],
   ];
+  if (isThreeD(layer)) {
+    const H = planeHomography(sceneAt(comp, t).view, worldModel(layer, t, byId));
+    const pts = lh.map((p) => projectLayerPoint(H, p[0], p[1]));
+    if (pts.some((p) => !p)) return null;
+    const handles3 = pts as Vec2[];
+    const anchor3 = projectLayerPoint(H, ...(baseValue(layer.transform.anchor, t) as Vec2)) ?? handles3[0];
+    return { three: true, poly: [handles3[0], handles3[2], handles3[4], handles3[6]], handles: handles3, rot: handles3[1], anchor: anchor3, localHandles: lh };
+  }
   const handles = lh.map((p) => apply(W, p));
   const poly = [handles[0], handles[2], handles[4], handles[6]];
   const cx = (handles[0][0] + handles[4][0]) / 2;
@@ -95,6 +109,49 @@ function computeGizmo(project: Project, comp: Comp, layer: Layer, t: number, zoo
   const off = ROT_OFFSET / zoom;
   const anchor = apply(W, baseValue(layer.transform.anchor, t) as Vec2);
   return { poly, handles, rot: [top[0] + nx * off, top[1] + ny * off], anchor, localHandles: lh };
+}
+
+/** The camera's point of interest, or a light and its target, drawn as seen through the composition's view. */
+function drawSceneMarker(g: CanvasRenderingContext2D, comp: Comp, layer: Layer, t: number, zoom: number): void {
+  const view = sceneAt(comp, t).view;
+  const proj = (p: [number, number, number]): Vec2 | null => {
+    if (!view.perspective) return [p[0], p[1]];
+    const q = toView(view, p);
+    return q[2] > 1e-3 ? [view.cx + (view.zoom * q[0]) / q[2], view.cy + (view.zoom * q[1]) / q[2]] : null;
+  };
+  const poi3 = [...evalVec(layer.content.poi, t), evalNum(layer.content.poiZ, t)] as [number, number, number];
+  const poi = proj(poi3);
+  const kind = layer.type === 'light' ? LIGHT_KINDS[Math.round(evalNum(layer.content.lightType, t))] : null;
+  const at = point4(worldModel(layer, t, layerMap(comp)), [0, 0, 0]);
+  const pos = layer.type === 'light' && kind !== 'ambient' && kind !== 'parallel' ? proj(at) : null;
+  g.save();
+  g.strokeStyle = '#ffd24a';
+  g.fillStyle = '#ffd24a';
+  g.lineWidth = 1.5;
+  const showTarget = layer.type === 'camera' || kind === 'spot' || kind === 'parallel';
+  if (poi && showTarget) {
+    g.beginPath();
+    g.arc(poi[0] * zoom, poi[1] * zoom, 6, 0, Math.PI * 2);
+    g.moveTo(poi[0] * zoom - 11, poi[1] * zoom);
+    g.lineTo(poi[0] * zoom + 11, poi[1] * zoom);
+    g.moveTo(poi[0] * zoom, poi[1] * zoom - 11);
+    g.lineTo(poi[0] * zoom, poi[1] * zoom + 11);
+    g.stroke();
+  }
+  if (pos) {
+    if (poi && showTarget) {
+      g.setLineDash([5, 4]);
+      g.beginPath();
+      g.moveTo(pos[0] * zoom, pos[1] * zoom);
+      g.lineTo(poi[0] * zoom, poi[1] * zoom);
+      g.stroke();
+      g.setLineDash([]);
+    }
+    g.beginPath();
+    g.arc(pos[0] * zoom, pos[1] * zoom, 7, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
 }
 
 interface PathGizmo {
@@ -201,7 +258,7 @@ export const isPenActive = (): boolean => penActive;
 type Drag =
   | { kind: 'pan'; x: number; y: number; px: number; py: number }
   | { kind: 'zoom' }
-  | { kind: 'move'; start: Vec2; items: { id: string; pos: Vec2; inv: Mat | null }[]; moved: boolean; shiftLayer: string | null; box0: Box | null; targets: SnapTargets }
+  | { kind: 'move'; start: Vec2; items: { id: string; pos: Vec2; inv: Mat | null; z: number | null }[]; view: ReturnType<typeof sceneAt>['view']; moved: boolean; shiftLayer: string | null; box0: Box | null; targets: SnapTargets }
   | { kind: 'scale'; id: string; handle: number; start: Vec2; anchor: Vec2; scale: Vec2; W: Mat }
   | { kind: 'rotate'; id: string; anchor: Vec2; rot: number; last: number; total: number }
   | { kind: 'create'; start: Vec2; cur: Vec2 }
@@ -456,7 +513,7 @@ export function Viewer() {
       g.moveTo(ax, ay - 9);
       g.lineTo(ax, ay + 9);
       g.stroke();
-      if (sel.length === 1 && l.type !== 'adjustment') {
+      if (sel.length === 1 && l.type !== 'adjustment' && !gz.three) {
         g.strokeStyle = '#4aa3ff';
         g.beginPath();
         g.moveTo(gz.handles[1][0] * zoom, gz.handles[1][1] * zoom);
@@ -471,6 +528,11 @@ export function Viewer() {
           g.stroke();
         }
       }
+    }
+    // where the selected camera's point of interest, or the selected light and what it points at, are
+    for (const id of sel) {
+      const L = c.layers.find((l) => l.id === id);
+      if (L && (L.type === 'camera' || L.type === 'light')) drawSceneMarker(g, c, L, t, zoom);
     }
     // masks of the selected layer, and the vertices of whichever path is being edited
     const st = appStore.get();
@@ -686,12 +748,29 @@ export function Viewer() {
     c.layers.forEach((l, i) => {
       if (i > 0 && l.matte !== 'none') consumed.add(c.layers[i - 1].id);
     });
+    // Collect what is under the pointer, top of the stack first. A run of 3D layers at the top is
+    // ordered by depth on screen, so the one picked is the one in front, not the one highest in the stack.
+    const hits: Layer[] = [];
     for (const l of c.layers) {
       if (!l.visible || l.locked || consumed.has(l.id) || l.type === 'adjustment') continue;
       if (t < l.inPoint || t >= l.outPoint) continue;
-      if (hitTestLayer(s.project, l, t, byId, p)) return l.id;
+      if (hitTestLayer(s.project, l, t, byId, p, c)) hits.push(l);
     }
-    return null;
+    if (!hits.length) return null;
+    if (!isThreeD(hits[0])) return hits[0].id;
+    const view = sceneAt(c, t).view;
+    let best = hits[0];
+    let bestDepth = Infinity;
+    for (const l of hits) {
+      if (!isThreeD(l)) break;
+      const b = localBounds(s.project, l, t);
+      const d = depthOf(view, point4(worldModel(l, t, byId), b ? [b.x + b.w / 2, b.y + b.h / 2, 0] : [0, 0, 0]));
+      if (d < bestDepth - 1e-9) {
+        best = l;
+        bestDepth = d;
+      }
+    }
+    return best.id;
   };
 
   const gizmoHit = (p: Vec2): { kind: 'rotate' } | { kind: 'scale'; handle: number } | null => {
@@ -699,7 +778,7 @@ export function Viewer() {
     if (s.selection.length !== 1) return null;
     const c = activeComp(s);
     const l = c.layers.find((x) => x.id === s.selection[0]);
-    if (!l || l.locked || l.type === 'adjustment') return null;
+    if (!l || l.locked || l.type === 'adjustment' || isThreeD(l)) return null;
     const gz = computeGizmo(s.project, c, l, timeStore.get().t, zoom);
     if (!gz) return null;
     const r = HANDLE_R / zoom;
@@ -876,11 +955,13 @@ export function Viewer() {
         id: l.id,
         pos: baseValue(l.transform.position, t) as Vec2,
         inv: invert(parentWorld(l, t, byId)),
+        // a 3D layer moves in its plane of constant depth: remember where that plane is
+        z: isThreeD(l) ? point4(worldModel(l, t, byId), [...(baseValue(l.transform.anchor, t) as Vec2), 0])[2] : null,
       }));
     el.setPointerCapture(e.pointerId);
     beginGesture();
     const movingIds = new Set(items.map((i) => i.id));
-    drag.current = { kind: 'move', start: p, items, moved: false, shiftLayer: null, box0: boxOf(s.project, c, movingIds, t), targets: snapTargetsFor(s.project, c, movingIds, t) };
+    drag.current = { kind: 'move', start: p, items, view: sceneAt(c, t).view, moved: false, shiftLayer: null, box0: boxOf(s.project, c, movingIds, t), targets: snapTargetsFor(s.project, c, movingIds, t) };
   };
 
   const onPointerMove = (e: RPointerEvent) => {
@@ -997,10 +1078,19 @@ export function Viewer() {
       }
       dragTick.current++;
       schedule();
-      const updates: PropUpdate[] = d.items.map((it) => {
-        const v = it.inv ? applyVec(it.inv, [dx, dy]) : [dx, dy];
-        return { layerId: it.id, group: 'transform', key: 'position', value: [it.pos[0] + v[0], it.pos[1] + v[1]] };
-      });
+      const updates: PropUpdate[] = [];
+      for (const it of d.items) {
+        let delta: Vec2 = [dx, dy];
+        if (it.z !== null) {
+          // screen movement → movement in the layer's plane of constant depth
+          const a = screenToWorldAtZ(d.view, d.start[0], d.start[1], it.z);
+          const b = screenToWorldAtZ(d.view, d.start[0] + dx, d.start[1] + dy, it.z);
+          if (!a || !b) continue;
+          delta = [b[0] - a[0], b[1] - a[1]];
+        }
+        const v = it.inv ? applyVec(it.inv, delta) : delta;
+        updates.push({ layerId: it.id, group: 'transform', key: 'position', value: [it.pos[0] + v[0], it.pos[1] + v[1]] });
+      }
       setManyProps(updates, t);
       return;
     }

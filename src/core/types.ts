@@ -67,8 +67,12 @@ export interface Prop {
   loop?: 'cycle' | 'pingpong';
 }
 
-export type TransformKey = 'anchor' | 'position' | 'scale' | 'rotation' | 'opacity';
-export const TRANSFORM_KEYS: TransformKey[] = ['anchor', 'position', 'scale', 'rotation', 'opacity'];
+export type TransformKey = 'anchor' | 'position' | 'scale' | 'rotation' | 'opacity' | 'positionZ' | 'rotationX' | 'rotationY';
+/** Every transform property a layer carries. The last three only matter on 3D layers. */
+export const TRANSFORM_KEYS: TransformKey[] = ['anchor', 'position', 'scale', 'rotation', 'opacity', 'positionZ', 'rotationX', 'rotationY'];
+/** The properties every project file has had since the start (the 3D ones are filled in when missing). */
+export const TRANSFORM_KEYS_2D: TransformKey[] = ['anchor', 'position', 'scale', 'rotation', 'opacity'];
+export const TRANSFORM_KEYS_3D: TransformKey[] = ['positionZ', 'rotationX', 'rotationY'];
 
 export type BlendMode =
   | 'normal'
@@ -118,7 +122,7 @@ export const MATTE_MODES: { id: MatteMode; label: string }[] = [
   { id: 'lumaInv', label: 'Luma Inverted' },
 ];
 
-export type LayerType = 'solid' | 'shape' | 'text' | 'image' | 'video' | 'audio' | 'precomp' | 'null' | 'adjustment';
+export type LayerType = 'solid' | 'shape' | 'text' | 'image' | 'video' | 'audio' | 'precomp' | 'null' | 'adjustment' | 'camera' | 'light';
 
 /** Layers whose content is a footage file (and so may carry sound). */
 export const isFootageType = (t: LayerType): t is 'image' | 'video' | 'audio' => t === 'image' || t === 'video' || t === 'audio';
@@ -153,6 +157,8 @@ export type LayerData =
   | { type: 'image'; assetId: string }
   | { type: 'video'; assetId: string }
   | { type: 'audio'; assetId: string }
+  | { type: 'camera' }
+  | { type: 'light' }
   | { type: 'precomp'; compId: string };
 
 export interface Effect {
@@ -240,6 +246,8 @@ export interface Layer {
   locked: boolean;
   /** Audio and video layers: leave this layer's sound out of the mix. */
   muted?: boolean;
+  /** Place the layer in 3D space: Z position, X/Y rotation, perspective from the camera, lighting. */
+  threeD?: boolean;
   motionBlur: boolean;
   parentId: string | null;
   blend: BlendMode;
@@ -305,6 +313,11 @@ export interface PropRef {
   group: PropGroup;
   key: string;
 }
+
+/** Light layers choose how they shine with their `lightType` property (an index into this list). */
+export const LIGHT_TYPES = ['Parallel', 'Spot', 'Point', 'Ambient'] as const;
+export type LightType = 'parallel' | 'spot' | 'point' | 'ambient';
+export const LIGHT_KINDS: LightType[] = ['parallel', 'spot', 'point', 'ambient'];
 
 export const LABEL_COLORS = [
   '#e0584d',

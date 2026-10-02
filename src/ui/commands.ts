@@ -1,7 +1,9 @@
 import { EFFECTS } from '../core/effectDefs';
 import {
   addAdjustment,
+  addCamera,
   addEffect,
+  addLight,
   addNull,
   addShape,
   addStarterMask,
@@ -23,6 +25,7 @@ import {
   precompose,
   resetTransform,
   saveProjectFile,
+  setLayerField,
   selectAllLayers,
   selectLayers,
   sequenceLayers,
@@ -79,6 +82,13 @@ export function buildCommands(): Command[] {
   add('Add', 'Add solid…', () => openDialog({ kind: 'solid' }), { keywords: 'color background' });
   add('Add', 'Add adjustment layer', () => void addAdjustment(), { keywords: 'grade effect all' });
   add('Add', 'Add null object', () => void addNull(), { keywords: 'parent control' });
+  add('Add', 'Add camera', () => void addCamera(), { keywords: '3d perspective view' });
+  for (const kind of ['spot', 'point', 'parallel', 'ambient'] as const) add('Add', `Add ${kind} light`, () => void addLight(kind), { keywords: '3d shade lighting' });
+  add('Edit', 'Toggle 3D layer', () => {
+    const layers = comp.layers.filter((l) => s.selection.includes(l.id) && l.type !== 'audio' && l.type !== 'camera' && l.type !== 'light');
+    const on = layers.length > 0 && layers.every((l) => l.threeD);
+    setLayerField(layers.map((l) => l.id), { threeD: !on });
+  }, { keywords: 'three dimensional depth z rotate x y perspective', disabled: !s.selection.length });
   add('Add', 'Add composition…', () => openDialog({ kind: 'compSettings', compId: null }), { keywords: 'new scene' });
   add('Add', 'Add rectangle mask', () => addStarterMask(sel[0], 'rect'), { disabled: sel.length !== 1 });
   add('Add', 'Add ellipse mask', () => addStarterMask(sel[0], 'ellipse'), { disabled: sel.length !== 1 });

@@ -22,6 +22,8 @@ import {
   createPathShape,
   starterMaskPath,
   createAudioLayer,
+  createCamera,
+  createLight,
   createImageLayer,
   createVideoLayer,
   createNull,
@@ -40,6 +42,7 @@ import { insertVertex, removeVertex } from '../core/path';
 import { cloneLayer, findKey, layerProps, layerPropEntries, resolveProp, shiftLayer } from '../core/props';
 import { parseProject, serializeProject, isProjectFileError } from '../core/serialize';
 import { snapToFrame } from '../core/time';
+import { LIGHT_KINDS, LIGHT_TYPES } from '../core/types';
 import type {
   BlendMode,
   Comp,
@@ -48,6 +51,7 @@ import type {
   Keyframe,
   Layer,
   LayerData,
+  LightType,
   MaskMode,
   MatteMode,
   Project,
@@ -372,6 +376,18 @@ export const addNull = (): string => {
   return insertLayer((comp, p) => createNull({ name: `Null ${nextCount(p, 'null')}`, comp, time: t }));
 };
 
+/** A camera: with one in the composition, 3D layers are drawn in perspective from its point of view. */
+export const addCamera = (): string => {
+  const t = now();
+  return insertLayer((comp, p) => createCamera({ name: `Camera ${nextCount(p, 'camera')}`, comp, time: t }));
+};
+
+/** A light that shades 3D layers. */
+export const addLight = (kind: LightType = 'spot'): string => {
+  const t = now();
+  return insertLayer((comp, p) => createLight({ name: `${LIGHT_TYPES[LIGHT_KINDS.indexOf(kind)]} Light ${nextCount(p, 'light')}`, comp, time: t, kind }));
+};
+
 export const addAdjustment = (): string => {
   const t = now();
   return insertLayer((comp, p) => createAdjustment({ name: `Adjustment Layer ${nextCount(p, 'adjustment')}`, comp, time: t }));
@@ -483,7 +499,7 @@ export function duplicateLayers(ids: string[]): void {
   appStore.set({ selection: created, selKeys: [] });
 }
 
-type LayerFlags = Partial<Pick<Layer, 'name' | 'visible' | 'solo' | 'locked' | 'muted' | 'motionBlur' | 'label'>> & {
+type LayerFlags = Partial<Pick<Layer, 'name' | 'visible' | 'solo' | 'locked' | 'muted' | 'threeD' | 'motionBlur' | 'label'>> & {
   blend?: BlendMode;
   matte?: MatteMode;
 };

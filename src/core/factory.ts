@@ -1,6 +1,6 @@
 import { uid } from './ids';
 import { ellipsePath, pathBounds, rectPath, translatePath } from './path';
-import type { TextAnimator } from './types';
+import { LIGHT_KINDS, LIGHT_TYPES, type TextAnimator } from './types';
 import type {
   Comp,
   Layer,
@@ -15,6 +15,7 @@ import type {
   RGB,
   ShapeKind,
   TransformKey,
+  LightType,
   Vec2,
 } from './types';
 
@@ -34,6 +35,9 @@ export function makeTransform(position: Vec2 = [0, 0], anchor: Vec2 = [0, 0]): R
     scale: makeProp('vec2', 'Scale', [100, 100], { unit: '%', step: 1, decimals: 1, link: true }),
     rotation: makeProp('number', 'Rotation', 0, { unit: '°', step: 1, decimals: 1 }),
     opacity: makeProp('number', 'Opacity', 100, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+    positionZ: makeProp('number', 'Position Z', 0, { unit: 'px', step: 1, decimals: 1 }),
+    rotationX: makeProp('number', 'X Rotation', 0, { unit: '°', step: 1, decimals: 1 }),
+    rotationY: makeProp('number', 'Y Rotation', 0, { unit: '°', step: 1, decimals: 1 }),
   };
 }
 
@@ -87,7 +91,7 @@ function baseLayer(type: LayerType, data: LayerData, o: BaseOpts, content: Recor
     id: uid('layer'),
     name: o.name,
     type,
-    label: ({ solid: 0, shape: 1, text: 2, image: 3, video: 4, audio: 4, precomp: 5, null: 6, adjustment: 7 } as const)[type],
+    label: ({ solid: 0, shape: 1, text: 2, image: 3, video: 4, audio: 4, precomp: 5, null: 6, adjustment: 7, camera: 8, light: 2 } as const)[type],
     start: o.time,
     inPoint: o.time,
     outPoint: Math.max(o.time + 1 / o.comp.fps, o.comp.duration),
@@ -185,6 +189,54 @@ export function createText(o: BaseOpts & { text: string }): Layer {
 
 export function createImageLayer(o: BaseOpts & { assetId: string; width: number; height: number }): Layer {
   return baseLayer('image', { type: 'image', assetId: o.assetId }, { ...o, anchor: [o.width / 2, o.height / 2] }, {});
+}
+
+/** A camera's default lens: the zoom (distance in pixels to the picture plane) of a 50 mm lens on 36 mm film. */
+export const defaultZoom = (compWidth: number): number => (compWidth * 50) / 36;
+
+/**
+ * A camera layer. With one in the composition, 3D layers are drawn in perspective from its position
+ * looking at its point of interest; the default position puts layers at Z = 0 exactly where they are in 2D.
+ */
+export function createCamera(o: BaseOpts): Layer {
+  const { width, height } = o.comp;
+  const zoom = defaultZoom(width);
+  const l = baseLayer(
+    'camera',
+    { type: 'camera' },
+    { ...o, position: [width / 2, height / 2], anchor: [0, 0] },
+    {
+      zoom: makeProp('number', 'Zoom', zoom, { unit: 'px', min: 10, max: 100000, step: 10, decimals: 0 }),
+      poi: makeProp('vec2', 'Point of Interest', [width / 2, height / 2], { unit: 'px', step: 1, decimals: 1 }),
+      poiZ: makeProp('number', 'Point of Interest Z', 0, { unit: 'px', step: 1, decimals: 1 }),
+    },
+  );
+  l.transform.positionZ.value = -zoom;
+  l.threeD = true;
+  return l;
+}
+
+/** A light layer. It shades 3D layers: ambient lights evenly, the others by the angle the layer faces them. */
+export function createLight(o: BaseOpts & { kind?: LightType }): Layer {
+  const { width, height } = o.comp;
+  const kind = o.kind ?? 'spot';
+  const l = baseLayer(
+    'light',
+    { type: 'light' },
+    { ...o, position: [width / 2, height * 0.25], anchor: [0, 0] },
+    {
+      lightType: makeProp('number', 'Light Type', LIGHT_KINDS.indexOf(kind), { options: [...LIGHT_TYPES], min: 0, max: 3, step: 1, decimals: 0 }),
+      intensity: makeProp('number', 'Intensity', kind === 'ambient' ? 40 : 100, { unit: '%', min: 0, max: 400, step: 1, decimals: 0 }),
+      color: makeProp('color', 'Color', [255, 255, 255]),
+      poi: makeProp('vec2', 'Point of Interest', [width / 2, height / 2], { unit: 'px', step: 1, decimals: 1 }),
+      poiZ: makeProp('number', 'Point of Interest Z', 0, { unit: 'px', step: 1, decimals: 1 }),
+      cone: makeProp('number', 'Cone Angle', 90, { unit: '°', min: 1, max: 179, step: 1, decimals: 0 }),
+      feather: makeProp('number', 'Cone Feather', 50, { unit: '%', min: 0, max: 100, step: 1, decimals: 0 }),
+    },
+  );
+  l.transform.positionZ.value = -width * 0.6;
+  l.threeD = true;
+  return l;
 }
 
 /** Volume (100 % = as recorded) and pan: the properties of anything that makes sound. */

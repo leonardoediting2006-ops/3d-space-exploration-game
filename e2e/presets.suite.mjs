@@ -13,17 +13,15 @@ try {
   // two presets, saved the way the app does it
   await A(async () => {
     const ks = window.__ks;
-    const { applyLibraryItem } = await import('/src/state/templateActions.ts');
-    const { findLibraryItem } = await import('/src/templates/index.ts');
     const s = ks.appStore.get();
     const comp = s.project.comps[s.activeCompId];
     const layer = comp.layers.find((l) => l.name === 'Ring') ?? comp.layers[0];
     ks.actions.selectLayers([layer.id]);
     ks.actions.setTime(1);
-    applyLibraryItem(findLibraryItem('motion.slideInLeft'));
+    ks.templateActions.applyLibraryItemById('motion.slideInLeft');
     let cur = ks.appStore.get().project.comps[s.activeCompId].layers.find((l) => l.id === layer.id);
     ks.presets.saveAnimationPreset(cur, cur.anims[0], 'Alpha slide');
-    applyLibraryItem(findLibraryItem('motion.popIn'));
+    ks.templateActions.applyLibraryItemById('motion.popIn');
     cur = ks.appStore.get().project.comps[s.activeCompId].layers.find((l) => l.id === layer.id);
     ks.presets.saveAnimationPreset(cur, cur.anims.find((a) => a.template === 'motion.popIn'), 'Beta pop');
   });
@@ -70,15 +68,13 @@ try {
   // imported presets really apply
   const applied = await A(async () => {
     const ks = window.__ks;
-    const { applyLibraryItem } = await import('/src/state/templateActions.ts');
-    const { findLibraryItem } = await import('/src/templates/index.ts');
     const s = ks.appStore.get();
     const comp = s.project.comps[s.activeCompId];
     const target = comp.layers.find((l) => l.name === 'Star') ?? comp.layers[1];
     ks.actions.selectLayers([target.id]);
     ks.actions.setTime(2);
     const p = ks.presets.presetStore.get().presets.find((x) => x.name === 'Alpha slide');
-    applyLibraryItem(findLibraryItem(p.id));
+    ks.templateActions.applyLibraryItemById(p.id);
     const l = ks.appStore.get().project.comps[s.activeCompId].layers.find((x) => x.id === target.id);
     return { anims: l.anims.length, keys: l.transform.position.keys.length };
   });

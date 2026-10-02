@@ -1,5 +1,5 @@
 import { uid } from './ids';
-import { TRANSFORM_KEYS, type Layer, type Prop, type PropGroup } from './types';
+import { TRANSFORM_KEYS, TRANSFORM_KEYS_3D, type Layer, type Prop, type PropGroup, type TransformKey } from './types';
 
 /** Every property on a layer: transform, content, then each effect's parameters. */
 export function layerProps(layer: Layer): Prop[] {
@@ -74,3 +74,26 @@ export function findKey(layers: Layer[], keyId: string): FoundKey | null {
   }
   return null;
 }
+
+/**
+ * The transform properties worth showing for a layer, in display order: a 3D layer adds Z position
+ * and X/Y rotation; a camera or light only has the few that apply to it; sound has none. A property
+ * that already has keyframes is always shown so animation is never hidden.
+ */
+export function transformKeysShown(layer: Layer): TransformKey[] {
+  const base: TransformKey[] =
+    layer.type === 'audio'
+      ? []
+      : layer.type === 'camera'
+        ? ['position', 'positionZ', 'rotation']
+        : layer.type === 'light'
+          ? ['position', 'positionZ']
+          : layer.threeD
+            ? ['anchor', 'position', 'positionZ', 'scale', 'rotationX', 'rotationY', 'rotation', 'opacity']
+            : ['anchor', 'position', 'scale', 'rotation', 'opacity'];
+  const extra = TRANSFORM_KEYS.filter((k) => !base.includes(k) && layer.transform[k].keys.length > 0 && (layer.threeD || !TRANSFORM_KEYS_3D.includes(k)));
+  return [...base, ...extra];
+}
+
+/** What the layer's Rotation property is called: with a third dimension it is the rotation about Z. */
+export const rotationLabel = (layer: Layer): string => (layer.type === 'camera' ? 'Roll' : layer.threeD ? 'Z Rotation' : 'Rotation');

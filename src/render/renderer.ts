@@ -1,11 +1,14 @@
 import { cssColor, evalNum, evalProp } from '../core/interp';
-import { apply, clamp, mul, scaling, type Mat } from '../core/math';
+import { apply, clamp, mul, scaling, translate, type Mat } from '../core/math';
 import { pathToPath2D, pointCount } from '../core/path';
 import { BLEND_MODES, type Comp, type Effect, type Layer, type MatteMode, type Project } from '../core/types';
 import { Accumulator } from './accumulate';
+import { depthOf, planeHomography, sceneAt, worldModel, type Mat3, type Scene3D } from '../core/scene3d';
+import { point4 } from '../core/math3';
 import { applyEffects, effectPadding, filterPass } from './effects';
 import { contentPad, layerMap, localBounds, rectCorners, worldMatrix, type Rect } from './geometry';
 import { isSingleDraw, paintContent } from './painters';
+import { drawPlane, drawPlaneAffine, type PlaneDraw } from './plane3d';
 import { acquire, release, resetCtx } from './pool';
 
 export interface RenderOptions {
@@ -29,6 +32,10 @@ interface Frame {
   opts: RenderOptions;
   byId: Map<string, Layer>;
   anySolo: boolean;
+  /** The camera and lights at this frame's time. */
+  scene: Scene3D;
+  /** Set while a 3D layer's plane is rendered flat: it is drawn at the origin of its own pixel grid. */
+  plane?: { layerId: string; ox: number; oy: number };
 }
 
 const blendOp = (id: Layer['blend']): GlobalCompositeOperation =>
@@ -39,8 +46,12 @@ const inRange = (l: Layer, t: number): boolean => t >= l.inPoint - 1e-9 && t < l
 const isActive = (f: Frame, l: Layer): boolean => l.visible && (!f.anySolo || l.solo) && inRange(l, f.time);
 
 function layerMatrix(f: Frame, l: Layer, t: number): Mat {
+  if (f.plane && f.plane.layerId === l.id) return mul(scaling(f.s, f.s), translate(-f.plane.ox, -f.plane.oy));
   return mul(scaling(f.s, f.s), worldMatrix(l, t, f.byId));
 }
+
+/** Layers that are placed in 3D space (the rest, including cameras and lights, take no part in the picture). */
+const is3D = (l: Layer): boolean => !!l.threeD && l.type !== 'null' && l.type !== 'adjustment' && l.type !== 'camera' && l.type !== 'light' && l.type !== 'audio';
 
 function setM(ctx: CanvasRenderingContext2D, m: Mat): void {
   ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
@@ -279,6 +290,52 @@ function drawAdjustment(f: Frame, ctx: CanvasRenderingContext2D, l: Layer, effec
   release(below);
 }
 
+/**
+ * A 3D layer's picture at time t, projected onto a comp-sized surface: the layer is rendered flat
+ * into its own plane (masks and effects as usual), then drawn through the projection of that plane.
+ */
+function renderPlane(f: Frame, l: Layer, effects: Effect[], t: number): HTMLCanvasElement | null {
+  const b = localBounds(f.project, l, t);
+  if (!b) return null;
+  const scene = t === f.time ? f.scene : sceneAt(f.comp, t);
+  const model = worldModel(l, t, f.byId);
+  const pad = contentPad(l, t) + 2 + effectPadding(effects, f.s, t) / f.s;
+  const rect = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+  // very large planes are drawn at a lower resolution and stretched, to keep memory in check
+  let ps = f.s;
+  const biggest = Math.max(rect.w, rect.h) * ps;
+  if (biggest > 4096) ps *= 4096 / biggest;
+  const pw = Math.max(1, Math.ceil(rect.w * ps));
+  const ph = Math.max(1, Math.ceil(rect.h * ps));
+  const fp: Frame = { ...f, w: pw, h: ph, s: ps, time: t, plane: { layerId: l.id, ox: rect.x, oy: rect.y } };
+  const texture = renderLayerSurface(fp, l, effects, { x: 0, y: 0, w: pw, h: ph }, [t]);
+  const H: Mat3 = planeHomography(scene.view, model);
+  // layer units → output pixels: scale x' and y' (not w')
+  const out: Mat3 = [H[0] * f.s, H[1] * f.s, H[2] * f.s, H[3] * f.s, H[4] * f.s, H[5] * f.s, H[6], H[7], H[8]];
+  const draw: PlaneDraw = { width: f.w, height: f.h, texture, rect, H: out, model, lights: scene.lights, ps };
+  const surf = acquire(f.w, f.h);
+  const gl = drawPlane(draw);
+  if (gl) surf.getContext('2d')!.drawImage(gl, 0, 0);
+  else drawPlaneAffine(surf.getContext('2d')!, draw);
+  release(texture);
+  return surf;
+}
+
+/** The projected picture of a 3D layer, blurred across the shutter when motion blur is on. */
+function render3DSurface(f: Frame, l: Layer, effects: Effect[], times: number[]): HTMLCanvasElement | null {
+  if (times.length === 1) return renderPlane(f, l, effects, times[0]);
+  const acc = new Accumulator({ x: 0, y: 0, w: f.w, h: f.h });
+  for (const t of times) {
+    const s = renderPlane(f, l, effects, t);
+    if (!s) continue;
+    acc.add(s);
+    release(s);
+  }
+  const out = acquire(f.w, f.h);
+  acc.writeTo(out);
+  return out;
+}
+
 function drawLayer(f: Frame, ctx: CanvasRenderingContext2D, layers: Layer[], i: number, consumed: Set<string>): void {
   const l = layers[i];
   if (!isActive(f, l) || consumed.has(l.id) || l.type === 'null') return;
@@ -290,10 +347,11 @@ function drawLayer(f: Frame, ctx: CanvasRenderingContext2D, layers: Layer[], i: 
   const opacity = evalNum(l.transform.opacity, f.time) / 100;
   if (opacity <= 0) return;
   const times = sampleTimes(f, l);
-  const rect = layerRect(f, l, effects, times);
+  const three = is3D(l);
+  const rect = three ? { x: 0, y: 0, w: f.w, h: f.h } : layerRect(f, l, effects, times);
   if (!rect) return; // entirely off-screen
   const matteLayer = l.matte !== 'none' && i > 0 ? layers[i - 1] : null;
-  const simple = effects.length === 0 && !matteLayer && times.length === 1 && activeMasks(l).length === 0 && (opacity >= 0.999 || isSingleDraw(l));
+  const simple = !three && effects.length === 0 && !matteLayer && times.length === 1 && activeMasks(l).length === 0 && (opacity >= 0.999 || isSingleDraw(l));
 
   if (simple) {
     ctx.save();
@@ -304,13 +362,19 @@ function drawLayer(f: Frame, ctx: CanvasRenderingContext2D, layers: Layer[], i: 
     return;
   }
 
-  const surf = renderLayerSurface(f, l, effects, rect, times);
+  const surf = three ? render3DSurface(f, l, effects, times) : renderLayerSurface(f, l, effects, rect, times);
+  if (!surf) return;
   if (matteLayer && matteLayer.type !== 'null' && matteLayer.type !== 'adjustment') {
     // A matte outside its own time range is an empty matte: the layer it mattes disappears.
     const mEffects = matteLayer.effects.filter((e) => e.enabled);
     const mTimes = sampleTimes(f, matteLayer);
-    const mRect = inRange(matteLayer, f.time) ? layerRect(f, matteLayer, mEffects, mTimes) : null;
-    const matte = mRect ? renderLayerSurface(f, matteLayer, mEffects, mRect, mTimes) : acquire(f.w, f.h);
+    let matte: HTMLCanvasElement;
+    if (!inRange(matteLayer, f.time)) matte = acquire(f.w, f.h);
+    else if (is3D(matteLayer)) matte = render3DSurface(f, matteLayer, mEffects, mTimes) ?? acquire(f.w, f.h);
+    else {
+      const mRect = layerRect(f, matteLayer, mEffects, mTimes);
+      matte = mRect ? renderLayerSurface(f, matteLayer, mEffects, mRect, mTimes) : acquire(f.w, f.h);
+    }
     const mo = evalNum(matteLayer.transform.opacity, f.time) / 100;
     if (mo < 1) {
       const mctx = matte.getContext('2d')!;
@@ -329,6 +393,42 @@ function drawLayer(f: Frame, ctx: CanvasRenderingContext2D, layers: Layer[], i: 
   ctx.drawImage(surf, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
   ctx.restore();
   release(surf);
+}
+
+/**
+ * Stack order is back to front, except that neighbouring 3D layers are sorted by how far they are
+ * from the camera (farthest first), so a layer pushed back in Z goes behind its neighbours. 2D layers,
+ * and layers tied together by a track matte, stay where they are and separate the groups.
+ */
+function drawOrder(f: Frame, layers: Layer[], consumed: Set<string>): number[] {
+  const order: number[] = [];
+  for (let i = layers.length - 1; i >= 0; i--) order.push(i);
+  const sortable = (i: number) => {
+    const l = layers[i];
+    return is3D(l) && isActive(f, l) && l.matte === 'none' && !consumed.has(l.id);
+  };
+  const depth = (i: number): number => {
+    const l = layers[i];
+    const b = localBounds(f.project, l, f.time);
+    const c = point4(worldModel(l, f.time, f.byId), b ? [b.x + b.w / 2, b.y + b.h / 2, 0] : [0, 0, 0]);
+    return depthOf(f.scene.view, c);
+  };
+  let k = 0;
+  while (k < order.length) {
+    if (!sortable(order[k])) {
+      k++;
+      continue;
+    }
+    let end = k;
+    while (end < order.length && sortable(order[end])) end++;
+    if (end - k > 1) {
+      const run = order.slice(k, end).map((i) => ({ i, d: depth(i) }));
+      run.sort((a, b) => b.d - a.d || b.i - a.i); // farthest first; equal depth keeps the stack order
+      run.forEach((r, n) => (order[k + n] = r.i));
+    }
+    k = end;
+  }
+  return order;
 }
 
 /** Render a composition at a given time into a canvas (resized to the composition × scale). */
@@ -360,11 +460,12 @@ export function renderComp(
     s: opts.scale,
     opts,
     byId: layerMap(comp),
-    anySolo: layers.some((l) => l.solo),
+    anySolo: layers.some((l) => l.solo && l.type !== 'audio'),
+    scene: sceneAt(comp, time),
   };
   const consumed = new Set<string>();
   layers.forEach((l, i) => {
     if (i > 0 && l.matte !== 'none') consumed.add(layers[i - 1].id);
   });
-  for (let i = layers.length - 1; i >= 0; i--) drawLayer(f, ctx, layers, i, consumed);
+  for (const i of drawOrder(f, layers, consumed)) drawLayer(f, ctx, layers, i, consumed);
 }

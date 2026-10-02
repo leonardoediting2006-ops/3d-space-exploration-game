@@ -7,7 +7,6 @@ import {
   LABEL_COLORS,
   MASK_MODES,
   MATTE_MODES,
-  TRANSFORM_KEYS,
   type BlendMode,
   ANIM_SLOTS,
   type AnimInstance,
@@ -60,6 +59,7 @@ import { Icon, LAYER_ICON } from './Icon';
 import { Waveform } from './Waveform';
 import { GraphEditor } from './GraphEditor';
 import { PropEditor } from './PropEditor';
+import { rotationLabel, transformKeysShown } from '../core/props';
 
 const COLUMNS_W = 300;
 const RULER_H = 30;
@@ -80,7 +80,7 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
     rows.push({ kind: 'layer', id: layer.id, layer, index });
     const filter = showOnly[layer.id];
     const all: { group: PropGroup; key: string; prop: Prop; path: string }[] = [];
-    for (const k of TRANSFORM_KEYS) all.push({ group: 'transform', key: k, prop: layer.transform[k], path: `transform.${k}` });
+    for (const k of transformKeysShown(layer)) all.push({ group: 'transform', key: k, prop: layer.transform[k], path: `transform.${k}` });
     for (const [k, p] of Object.entries(layer.content)) all.push({ group: 'content', key: k, prop: p, path: `content.${k}` });
     for (const fx of layer.effects) for (const [k, p] of Object.entries(fx.props)) all.push({ group: `fx:${fx.id}`, key: k, prop: p, path: `fx.${fx.id}.${k}` });
     for (const m of layer.masks) for (const [k, p] of Object.entries(m.props)) all.push({ group: `mask:${m.id}`, key: k, prop: p, path: `mask.${m.id}.${k}` });
@@ -97,8 +97,8 @@ function buildRows(comp: Comp, expanded: Record<string, boolean>, showOnly: Reco
 
     const tId = `${layer.id}:transform`;
     const tOpen = expanded[tId] ?? true;
-    rows.push({ kind: 'group', id: tId, layer, label: 'Transform', depth: 1, open: tOpen });
-    if (tOpen) for (const k of TRANSFORM_KEYS) rows.push({ kind: 'prop', id: `${layer.id}:transform.${k}`, layer, group: 'transform', propKey: k, prop: layer.transform[k], depth: 2 });
+    if (transformKeysShown(layer).length) rows.push({ kind: 'group', id: tId, layer, label: 'Transform', depth: 1, open: tOpen });
+    if (tOpen && transformKeysShown(layer).length) for (const k of transformKeysShown(layer)) rows.push({ kind: 'prop', id: `${layer.id}:transform.${k}`, layer, group: 'transform', propKey: k, prop: layer.transform[k], depth: 2 });
 
     const live = layer.anims;
     if (live.length) {
@@ -723,7 +723,12 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onS
         </span>
       )}
       <span className="switches">
-        {layer.type !== 'audio' && (
+        {layer.type !== 'audio' && layer.type !== 'camera' && layer.type !== 'light' && (
+          <button className={`sw cube ${layer.threeD ? 'on' : ''}`} title={layer.threeD ? 'This is a 3D layer (click to flatten)' : 'Make this a 3D layer'} onClick={() => setLayerField(layer.id, { threeD: !layer.threeD })} data-testid={`three-${index}`}>
+            <Icon name="cube" size={13} />
+          </button>
+        )}
+        {layer.type !== 'audio' && layer.type !== 'camera' && layer.type !== 'light' && (
           <button className={`sw mb ${layer.motionBlur ? 'on' : ''}`} title="Motion blur" onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} data-testid={`mb-${index}`}>
             <Icon name="motionBlur" size={13} />
           </button>
@@ -859,7 +864,7 @@ function PropLeft({ row, onMenu }: { row: Extract<Row, { kind: 'prop' }>; onMenu
         <Icon name="clock" size={13} />
       </button>
       <span className="plabel">
-        {prop.label}
+        {group === 'transform' && propKey === 'rotation' ? rotationLabel(layer) : prop.label}
         {prop.wiggle && <i className="badge" title="Wiggle">~</i>}
         {prop.loop && <i className="badge" title={`Loop ${prop.loop}`}>∞</i>}
       </span>

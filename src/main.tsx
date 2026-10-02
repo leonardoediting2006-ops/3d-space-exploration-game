@@ -9,8 +9,10 @@ import { serializeProject } from './core/serialize';
 import * as assets from './render/assets';
 import * as playback from './render/playback';
 import * as video from './render/video';
+import * as plane3d from './render/plane3d';
 import { allAssetData } from './render/assets';
 import * as actions from './state/actions';
+import * as templateActions from './state/templateActions';
 import { appStore, timeStore } from './state/store';
 import './styles.css';
 
@@ -58,7 +60,7 @@ async function boot() {
   );
   // Debug hook for the end-to-end tests: always on in dev, opt-in in builds with ?debug
   if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
-    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions, presets, presetSync, assets, playback, video };
+    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions, presets, presetSync, assets, playback, video, plane3d, templateActions };
   }
 }
 

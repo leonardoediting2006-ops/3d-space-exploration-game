@@ -1,6 +1,6 @@
 import { getEffectDef } from './effectDefs';
 import { ANIMATOR_KEYS, makeTransform } from './factory';
-import { BLEND_MODES, MATTE_MODES, NAMED_EASES, TRANSFORM_KEYS, type Comp, type Layer, type Project, type Prop } from './types';
+import { BLEND_MODES, MATTE_MODES, NAMED_EASES, TRANSFORM_KEYS, TRANSFORM_KEYS_2D, TRANSFORM_KEYS_3D, type Comp, type Layer, type Project, type Prop } from './types';
 
 const FORMAT = 'keyframe-studio';
 const VERSION = 1;
@@ -88,12 +88,16 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
   for (const k of ['start', 'inPoint', 'outPoint', 'label'] as const) if (!isNum(l[k])) fail(`${what}.${k}`);
   for (const k of ['visible', 'solo', 'locked', 'motionBlur'] as const) if (typeof l[k] !== 'boolean') fail(`${what}.${k}`);
   if (l.muted !== undefined && typeof l.muted !== 'boolean') fail(`${what}.muted`);
+  if (l.threeD !== undefined && typeof l.threeD !== 'boolean') fail(`${what}.threeD`);
   if (l.parentId !== null && typeof l.parentId !== 'string') fail(`${what}.parentId`);
   if (!BLEND_MODES.some((b) => b.id === l.blend)) fail(`${what}.blend`);
   if (!MATTE_MODES.some((m) => m.id === l.matte)) fail(`${what}.matte`);
   if (!isObj(l.transform)) fail(`${what}.transform`);
   const tr = l.transform as Record<string, unknown>;
-  for (const key of TRANSFORM_KEYS) checkProp(tr[key], `${what} ${key}`);
+  const KIND: Record<string, Prop['kind']> = { anchor: 'vec2', position: 'vec2', scale: 'vec2', rotation: 'number', opacity: 'number', positionZ: 'number', rotationX: 'number', rotationY: 'number' };
+  for (const key of TRANSFORM_KEYS_2D) if (checkProp(tr[key], `${what} ${key}`).kind !== KIND[key]) fail(`${what} ${key} has the wrong kind of value`);
+  // files from before 3D have no Z or X/Y rotation: repairProject adds them
+  for (const key of TRANSFORM_KEYS_3D) if (tr[key] !== undefined && checkProp(tr[key], `${what} ${key}`).kind !== KIND[key]) fail(`${what} ${key} has the wrong kind of value`);
   if (!isObj(l.content)) fail(`${what}.content`);
   for (const [k, p] of Object.entries(l.content as Record<string, unknown>)) checkProp(p, `${what} ${k}`);
   if (!Array.isArray(l.effects)) fail(`${what}.effects`);
@@ -162,6 +166,18 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
       const asset = projectAssets[d.assetId as string];
       if (!isObj(asset) || (asset.kind ?? 'image') !== l.type) fail(`${what} points at footage of the wrong kind`);
       if (d.type !== l.type) fail(`${what}.data.type`);
+      break;
+    }
+    case 'camera':
+    case 'light': {
+      if (d.type !== l.type) fail(`${what}.data.type`);
+      // the renderer reads these without checking, so they must be there, with the right kinds
+      const need: Record<string, Prop['kind']> =
+        l.type === 'camera'
+          ? { zoom: 'number', poi: 'vec2', poiZ: 'number' }
+          : { lightType: 'number', intensity: 'number', color: 'color', poi: 'vec2', poiZ: 'number', cone: 'number', feather: 'number' };
+      const content = l.content as Record<string, Prop | undefined>;
+      for (const [key, kind] of Object.entries(need)) if (content[key]?.kind !== kind) fail(`${what} is missing its ${key} property`);
       break;
     }
     case 'precomp':

@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { ShapeKind } from '../core/types';
-import { addAdjustment, addFootageLayer, addNull, addShape, addText, closeCompTab, FOOTAGE_ACCEPT, importFiles, openComp, openDialog } from '../state/actions';
+import { addAdjustment, addCamera, addFootageLayer, addLight, addNull, addShape, addText, closeCompTab, FOOTAGE_ACCEPT, importFiles, openComp, openDialog } from '../state/actions';
 import { activeComp, appStore, useApp, type Tool } from '../state/store';
 import { Icon, type IconName } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
@@ -47,6 +47,11 @@ export function Toolbar() {
     { label: 'Solid…', icon: <Icon name="shape" />, run: () => openDialog({ kind: 'solid' }) },
     { label: 'Adjustment layer', icon: <Icon name="sliders" />, run: () => void addAdjustment() },
     { label: 'Null object', icon: <Icon name="anchor" />, run: () => void addNull() },
+    { label: 'Camera', hint: '3D', icon: <Icon name="camera" />, run: () => void addCamera(), sep: true },
+    { label: 'Spot light', hint: '3D', icon: <Icon name="light" />, run: () => void addLight('spot') },
+    { label: 'Point light', hint: '3D', icon: <Icon name="light" />, run: () => void addLight('point') },
+    { label: 'Parallel light', hint: '3D', icon: <Icon name="light" />, run: () => void addLight('parallel') },
+    { label: 'Ambient light', hint: '3D', icon: <Icon name="light" />, run: () => void addLight('ambient') },
     { label: 'Composition…', icon: <Icon name="comp" />, run: () => openDialog({ kind: 'compSettings', compId: null }), sep: true },
   ];
 

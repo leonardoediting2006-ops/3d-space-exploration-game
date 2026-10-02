@@ -3,6 +3,7 @@ import { getEffectDef } from '../core/effectDefs';
 import type { AnimatorKind } from '../core/factory';
 import {
   BLEND_MODES,
+  LIGHT_KINDS,
   MASK_MODES,
   MATTE_MODES,
   type BlendMode,
@@ -54,6 +55,7 @@ import { EffectPicker } from './Pickers';
 import { commonContentKeys, commonOf, sharedEffects, type Member, type SharedEffect } from './multi';
 import { PropRow } from './PropRow';
 import { Waveform } from './Waveform';
+import { rotationLabel, transformKeysShown } from '../core/props';
 import { Field, Section } from './Section';
 
 type CompLite = Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
@@ -75,35 +77,63 @@ const peersOf = (layers: Layer[], pick: (l: Layer) => { group: PropGroup; prop: 
   });
 
 function LayerInspector({ layers: selected, comp }: { layers: Layer[]; comp: Comp }) {
-  // sound-only layers have no picture, so the picture sections skip them
+  // sound-only layers have no picture, and cameras and lights have no pixels: the picture sections skip them
   const audioOnly = selected.every((l) => l.type === 'audio');
   const layers = audioOnly ? selected : selected.filter((l) => l.type !== 'audio');
+  const pictures = layers.filter((l) => l.type !== 'camera' && l.type !== 'light');
+  const sceneOnly = !audioOnly && pictures.length === 0;
+  const main = pictures.length ? pictures : layers;
   const sound = selected.filter((l) => l.content.volume);
-  const layer = layers[0];
+  const layer = main[0];
   const d = layer.data;
-  const multi = layers.length > 1;
-  const ids = layers.map((l) => l.id);
+  const multi = main.length > 1;
+  const ids = main.map((l) => l.id);
+  // the properties every selected layer shows, in the first one's order
+  const keys = transformKeysShown(layer).filter((k) => main.every((l) => transformKeysShown(l).includes(k)));
+  const all3D = pictures.length > 0 && pictures.every((l) => l.threeD);
   return (
     <div className="inspector" data-testid="inspector">
       <LayerHeader layers={selected} />
-      {!audioOnly && <AlignBar ids={ids} />}
+      {!audioOnly && !sceneOnly && <AlignBar ids={ids} />}
 
-      {!audioOnly && (
-        <Section id="transform" title="Transform" actions={<ResetTransformButton ids={ids} />}>
-          {(['position', 'scale', 'rotation', 'opacity', 'anchor'] as const).map((k) => (
-            <PropRow key={k} layer={layer} comp={comp} group="transform" propKey={k} prop={layer.transform[k]} label={k === 'anchor' ? 'Anchor' : undefined} peers={peersOf(layers, (l) => ({ group: 'transform', prop: l.transform[k] }))} />
+      {!audioOnly && keys.length > 0 && (
+        <Section
+          id="transform"
+          title="Transform"
+          actions={
+            <>
+              {pictures.length > 0 && (
+                <button className={`chip three-d ${all3D ? 'on' : ''}`} title={all3D ? 'This is a 3D layer: it has depth, can tilt, and is viewed through the camera. Click to flatten.' : 'Make this a 3D layer: adds Z position and X/Y rotation'} onClick={() => setLayerField(pictures.map((l) => l.id), { threeD: !all3D })} data-testid="toggle-3d">
+                  <Icon name="cube" size={12} /> 3D
+                </button>
+              )}
+              {!sceneOnly && <ResetTransformButton ids={ids} />}
+            </>
+          }
+        >
+          {keys.map((k) => (
+            <PropRow
+              key={k}
+              layer={layer}
+              comp={comp}
+              group="transform"
+              propKey={k}
+              prop={layer.transform[k]}
+              label={k === 'anchor' ? 'Anchor' : k === 'rotation' ? rotationLabel(layer) : undefined}
+              peers={peersOf(main, (l) => ({ group: 'transform', prop: l.transform[k] }))}
+            />
           ))}
         </Section>
       )}
 
       {sound.length > 0 && <SoundSection layers={sound} comp={comp} />}
-      {!audioOnly && <SourceSection layers={layers} comp={comp} />}
-      {!audioOnly && <AnimateSection layers={layers} comp={comp} />}
-      {!audioOnly && <EffectsSection layers={layers} comp={comp} />}
-      {!audioOnly && !multi && d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
-      {!audioOnly && !multi && d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
-      {!audioOnly && !multi && d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
-      <LayerSection layers={layers} comp={comp} />
+      {!audioOnly && <SourceSection layers={main} comp={comp} />}
+      {!audioOnly && !sceneOnly && <AnimateSection layers={main} comp={comp} />}
+      {!audioOnly && !sceneOnly && <EffectsSection layers={main} comp={comp} />}
+      {!audioOnly && !sceneOnly && !multi && d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
+      {!audioOnly && !sceneOnly && !multi && d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
+      {!audioOnly && !sceneOnly && !multi && d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
+      <LayerSection layers={main} comp={comp} />
       {selected.length > 1 && <div className="hint compact multi-note">Keyframe curves, letter animators, masks and trim paths are edited one layer at a time. Click a layer's name above to focus it.</div>}
     </div>
   );
@@ -356,10 +386,16 @@ function hiddenContentKeys(layer: Layer): Set<string> {
     if (!d.stroke) ['strokeColor', 'strokeWidth'].forEach((k) => hidden.add(k));
     ['trimStart', 'trimEnd', 'trimOffset'].forEach((k) => hidden.add(k));
   }
+  if (d.type === 'light') {
+    // only show the settings this kind of light uses
+    const kind = LIGHT_KINDS[Math.round(layer.content.lightType?.value as number)] ?? 'spot';
+    if (kind === 'ambient' || kind === 'point') ['poi', 'poiZ', 'cone', 'feather'].forEach((k) => hidden.add(k));
+    if (kind === 'parallel') ['cone', 'feather'].forEach((k) => hidden.add(k));
+  }
   return hidden;
 }
 
-const SOURCE_TITLE: Record<string, string> = { text: 'Text', shape: 'Shape', solid: 'Solid', image: 'Image', video: 'Video', precomp: 'Composition', adjustment: 'Adjustment' };
+const SOURCE_TITLE: Record<string, string> = { text: 'Text', shape: 'Shape', solid: 'Solid', image: 'Image', video: 'Video', precomp: 'Composition', adjustment: 'Adjustment', camera: 'Camera', light: 'Light' };
 
 function SourceSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
   const layer = layers[0];
@@ -761,9 +797,10 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
   const allBlur = layers.every((l) => l.motionBlur);
   const allSolo = layers.every((l) => l.solo);
   const soundOnly = layers.every((l) => l.type === 'audio');
+  const noPicture = layers.every((l) => l.type === 'audio' || l.type === 'camera' || l.type === 'light');
   return (
-    <Section id="layer" title="Layer" defaultFolded={!soundOnly}>
-      {!soundOnly && (
+    <Section id="layer" title="Layer" defaultFolded={!noPicture}>
+      {!noPicture && (
       <Field label="Blend">
         <select className="mini-select wide" value={blend.mixed ? '' : blend.value} onChange={(e) => setLayerField(ids, { blend: e.target.value as BlendMode })} data-testid="ins-blend">
           {blend.mixed && (
@@ -781,7 +818,7 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
       )}
       {!multi && (
         <>
-          {!soundOnly && (
+          {!noPicture && (
           <Field label="Matte" title="Use the layer above as a matte">
             <select className="mini-select wide" disabled={index === 0} value={layer.matte} onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
               {MATTE_MODES.map((m) => (
@@ -815,7 +852,7 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
       )}
       <Field label="Switches">
         <div className="chips">
-          {!soundOnly && (
+          {!noPicture && (
             <Chip on={allBlur} onClick={() => setLayerField(ids, { motionBlur: !allBlur })} title="Motion blur (also needs Motion Blur on in the timeline)">
               Motion blur
             </Chip>
