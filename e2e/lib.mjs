@@ -1,8 +1,10 @@
 // Shared harness for the browser end-to-end suites. Each suite drives the real app in headless
 // Chromium, asserts on rendered pixels and document state, and fails on any console error.
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
 export const BASE = process.env.BASE_URL ?? 'http://localhost:5173';
@@ -13,11 +15,51 @@ function chromiumPath() {
   return fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined;
 }
 
+/**
+ * Start an Electron build (Chromium with H.264 encoding) and attach over CDP. Set E2E_ELECTRON to the
+ * electron binary; it runs under xvfb-run when there is no display.
+ */
+async function launchElectron(exe) {
+  const port = 9300 + Math.floor(Math.random() * 500);
+  const host = path.join(path.dirname(fileURLToPath(import.meta.url)), 'electron-host.cjs');
+  const args = ['--no-sandbox', `--remote-debugging-port=${port}`, host];
+  const [cmd, argv] = process.env.DISPLAY ? [exe, args] : ['xvfb-run', ['-a', exe, ...args]];
+  const child = spawn(cmd, argv, { stdio: 'ignore', detached: true });
+  for (let i = 0; ; i++) {
+    try {
+      if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) break;
+    } catch {
+      /* not up yet */
+    }
+    if (i > 60) throw new Error('Electron did not start');
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const context = browser.contexts()[0];
+  const page = context.pages()[0] ?? (await context.newPage());
+  const close = async () => {
+    await browser.close().catch(() => {});
+    try {
+      process.kill(-child.pid);
+    } catch {
+      /* already gone */
+    }
+  };
+  return { page, close };
+}
+
 /** Open a fresh app (autosave cleared, demo project loaded) and return helpers for asserting. */
-export async function open({ downloads = false } = {}) {
-  const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] });
-  const context = await browser.newContext({ viewport: { width: 1600, height: 950 }, acceptDownloads: downloads });
-  const page = await context.newPage();
+export async function open({ downloads = false, electron = false } = {}) {
+  let page;
+  let close;
+  if (electron && process.env.E2E_ELECTRON) {
+    ({ page, close } = await launchElectron(process.env.E2E_ELECTRON));
+  } else {
+    const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] });
+    const context = await browser.newContext({ viewport: { width: 1600, height: 950 }, acceptDownloads: downloads });
+    page = await context.newPage();
+    close = () => browser.close();
+  }
   const problems = [];
   page.on('console', (m) => {
     if (m.type() === 'error') problems.push(`console error: ${m.text()}`);
@@ -43,7 +85,7 @@ export async function open({ downloads = false } = {}) {
     const failed = results.filter((r) => !r.ok).length;
     if (problems.length) console.log('--- problems ---\n' + problems.join('\n'));
     console.log(`${results.length - failed}/${results.length} passed${problems.length ? `, ${problems.length} console problem(s)` : ''}`);
-    await browser.close();
+    await close();
     if (failed || problems.length) process.exitCode = 1;
   }
   return { page, check, finish, OUT };
