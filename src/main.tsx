@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import './state/presets'; // registers the user's saved presets with the library
+import * as presets from './state/presets'; // also registers the user's saved presets with the library
+import * as presetSync from './state/presetSync';
 import { App } from './ui/App';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { createDemoProject } from './core/demo';
@@ -41,6 +42,8 @@ async function boot() {
     }, 800);
   });
 
+  void presetSync.restoreSync();
+
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ErrorBoundary>
@@ -50,7 +53,7 @@ async function boot() {
   );
   // Debug hook for the end-to-end tests: always on in dev, opt-in in builds with ?debug
   if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
-    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions };
+    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions, presets, presetSync };
   }
 }
 

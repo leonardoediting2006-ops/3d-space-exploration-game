@@ -27,6 +27,8 @@ import {
   stackMove,
   timeReverseKeys,
 } from '../state/actions';
+import { exportPresets, importPresetsFromFile } from '../state/presets';
+import { chooseSyncFile } from '../state/presetSync';
 import { activeComp, appStore, redo, timeStore, toast, undo, useApp } from '../state/store';
 import { Icon } from './Icon';
 
@@ -88,6 +90,10 @@ export function MenuBar() {
       { label: 'Save Project', shortcut: 'Ctrl+S', run: saveProjectFile },
       { sep: true },
       { label: 'Export…', shortcut: 'Ctrl+M', run: () => openDialog({ kind: 'export' }) },
+      { sep: true },
+      { label: 'Import Presets…', run: () => void importPresetsFromFile() },
+      { label: 'Export My Presets…', run: () => exportPresets() },
+      { label: 'Sync Presets with a File…', run: () => void chooseSyncFile() },
     ],
     Edit: [
       { label: 'Undo', shortcut: 'Ctrl+Z', run: undo, disabled: undoCount === 0 },

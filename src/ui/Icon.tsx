@@ -50,6 +50,8 @@ const PATHS = {
   comp: <><rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6" /><path d="M2.4 6.2h11.2" /></>,
   film: <><rect x="2.4" y="2.8" width="11.2" height="10.4" rx="1.6" /><path d="M5 2.8v10.4M11 2.8v10.4M2.4 6h2.6M2.4 10h2.6M11 6h2.6M11 10h2.6" /></>,
   download: <path d="M8 2.5v7.5M4.8 7.3L8 10.5l3.2-3.2M3 13h10" />,
+  upload: <path d="M8 10.5V3M4.8 5.7L8 2.5l3.2 3.2M3 13h10" />,
+  sync: <><path d="M13 6.2A5.2 5.2 0 003.4 5M3 2.8V5.2h2.4" /><path d="M3 9.8A5.2 5.2 0 0012.6 11M13 13.2v-2.4h-2.4" /></>,
   folder: <path d="M2.4 4.6a1.2 1.2 0 011.2-1.2h2.7l1.4 1.6h4.3a1.2 1.2 0 011.2 1.2v5.2a1.2 1.2 0 01-1.2 1.2H3.6a1.2 1.2 0 01-1.2-1.2z" strokeLinejoin="round" />,
   undo: <><path d="M3.5 6.5h6a3 3 0 010 6H6" /><path d="M6 3.8L3.3 6.5 6 9.2" /></>,
   redo: <><path d="M12.5 6.5h-6a3 3 0 000 6H10" /><path d="M10 3.8l2.7 2.7L10 9.2" /></>,

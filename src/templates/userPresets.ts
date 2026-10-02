@@ -46,6 +46,8 @@ export interface UserPreset {
   /** Effects and letter animators as they were, with their keyframes moved into `props`. */
   effects: Effect[];
   animators: TextAnimator[];
+  /** When it was saved or last renamed (ms since epoch); decides which copy wins when presets are synced. */
+  updatedAt?: number;
 }
 
 const copy = <T extends PropValue>(v: T): T => (Array.isArray(v) ? ([...v] as T) : v);
@@ -326,5 +328,6 @@ export function sanitizePreset(raw: unknown): UserPreset | null {
     props,
     effects,
     animators,
+    ...(isNum(raw.updatedAt) && raw.updatedAt > 0 && raw.updatedAt < 4e12 ? { updatedAt: Math.floor(raw.updatedAt) } : {}),
   };
 }

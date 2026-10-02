@@ -406,7 +406,7 @@ try {
   check('deleting removes the preset', (await page.locator('.tpl-card:has-text("Soft entrance")').count()) === 0 && (await page.locator('.tpl-card:has-text("Big glow")').count()) === 1);
   await page.hover('.tpl-card:has-text("Big glow")');
   await page.click('.tpl-card:has-text("Big glow") [data-testid=preset-delete]');
-  check('and the tab goes when the last one is deleted', (await page.locator('[data-testid="lib-cat-mine"]').count()) === 0);
+  check('the tab stays when the last one is deleted, with an empty state and the import / export bar', (await page.locator('[data-testid="lib-cat-mine"]').count()) === 1 && (await page.locator('.tpl-card').count()) === 0 && (await page.locator('[data-testid=preset-bar]').count()) === 1 && (await page.locator('[data-testid=presets-export]').isDisabled()));
   await page.evaluate(() => window.__ks.appStore.set({ previewOnApply: false }));
 
   await page.evaluate(() => { const l = JSON.parse(localStorage.getItem('keyframe-studio:presets') ?? '[]'); localStorage.setItem('keyframe-studio:presets', JSON.stringify([...l, { id: 'user.evil', name: 'x', kind: 'motion', props: [{ target: { group: 'transform', key: 'position' }, keys: [{ t: 0, v: [1e999, 2], ease: 'linear' }] }] }, 'junk'])); });

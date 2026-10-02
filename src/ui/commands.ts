@@ -36,6 +36,8 @@ import {
   updateComp,
   type AlignMode,
 } from '../state/actions';
+import { exportPresets, importPresetsFromFile } from '../state/presets';
+import { chooseSyncFile } from '../state/presetSync';
 import { applyLibraryItem } from '../state/templateActions';
 import { activeComp, appStore, redo, timeStore, toast, undo } from '../state/store';
 import { CATEGORY_LABELS, LIBRARY, LIBRARY_ORDER, userItems } from '../templates';
@@ -142,6 +144,9 @@ export function buildCommands(): Command[] {
   add('File', 'Open project…', () => void window.dispatchEvent(new Event(OPEN_PROJECT_EVENT)), { hint: 'Ctrl+O' });
   add('File', 'Save project', saveProjectFile, { hint: 'Ctrl+S' });
   add('File', 'Export video or images…', () => openDialog({ kind: 'export' }), { hint: 'Ctrl+M', keywords: 'render webm mp4 png' });
+  add('File', 'Import presets…', () => void importPresetsFromFile(), { keywords: 'kfspresets my presets load' });
+  add('File', 'Export my presets…', () => exportPresets(), { keywords: 'kfspresets save backup share' });
+  add('File', 'Sync presets with a file…', () => void chooseSyncFile(), { keywords: 'dropbox onedrive icloud drive cloud' });
   add('File', 'Composition settings…', () => openDialog({ kind: 'compSettings', compId: comp.id }), { hint: 'Ctrl+Shift+K', keywords: 'size fps duration' });
   add('Help', 'Keyboard shortcuts', () => openDialog({ kind: 'shortcuts' }), { hint: '?' });
   add('Help', 'About Keyframe Studio', () => openDialog({ kind: 'about' }));

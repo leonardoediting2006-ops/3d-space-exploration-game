@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { gradientCss } from '../core/gradient';
 import type { Layer } from '../core/types';
 import { toggleFavorite, useFavorites } from '../state/favorites';
-import { deletePreset, renamePreset, useUserPresets } from '../state/presets';
+import { deletePreset, exportPresets, renamePreset, useUserPresets } from '../state/presets';
 import { applyGradient, applyLibraryItem, LIB_MIME } from '../state/templateActions';
 import { appStore, useActiveComp, useApp } from '../state/store';
 import { CATEGORY_LABELS, groupItems, LIBRARY, LIBRARY_ORDER, TEMPLATE_COUNT, findLibraryItem, userItems, type LibraryItem } from '../templates';
@@ -11,6 +11,7 @@ import { templateSource, type LibraryCategory } from '../templates/types';
 import { EaseThumb } from './EaseThumb';
 import { Icon } from './Icon';
 import { NamePrompt } from './NamePrompt';
+import { PresetBar } from './PresetBar';
 import { useAnchor } from './Popover';
 import { TemplateThumb } from './TemplateThumb';
 
@@ -73,6 +74,17 @@ function PresetTools({ item }: { item: LibraryItem }) {
           }}
         >
           <Icon name="edit" size={11} />
+        </button>
+        <button
+          className="tpl-tool"
+          title="Export this preset to a file"
+          onClick={(e) => {
+            e.stopPropagation();
+            exportPresets([item.id]);
+          }}
+          data-testid="preset-export"
+        >
+          <Icon name="download" size={11} />
         </button>
         <button
           className="tpl-tool"
@@ -164,7 +176,7 @@ export function LibraryPanel() {
 
   const shown = sections.reduce((n, s) => n + s.groups.reduce((m, [, items]) => m + items.length, 0), 0);
   const tabs: { id: Tab; label: string; count: number }[] = [
-    ...(mineItems.length ? [{ id: 'mine' as const, label: 'My presets', count: mineItems.length }] : []),
+    { id: 'mine' as const, label: 'My presets', count: mineItems.length },
     ...(favorites.length ? [{ id: 'favorites' as const, label: '♥ Favourites', count: favItems.length }] : []),
     ...LIBRARY_ORDER.map((c) => ({ id: c as Tab, label: CATEGORY_LABELS[c], count: LIBRARY[c].length })),
   ];
@@ -184,7 +196,16 @@ export function LibraryPanel() {
         )}
       </div>
       {!needle && cat !== 'favorites' && cat !== 'mine' && <div className="hint lib-hint">{HINTS[cat]}</div>}
-      {!needle && cat === 'mine' && <div className="hint lib-hint">Animations and looks you saved. Open an animation's ⋯ menu (or the heart in Effects) to save more; they work like any template.</div>}
+      {!needle && cat === 'mine' && (
+        <>
+          <div className="hint lib-hint">
+            {mineItems.length
+              ? "Animations and looks you saved. Open an animation's ⋯ menu (or the heart in Effects) to save more; they work like any template."
+              : "Nothing saved yet. Tune an animation under Inspector → Animate, then use its ⋯ menu → Save as preset. Or import presets someone shared with you."}
+          </div>
+          <PresetBar count={mineItems.length} />
+        </>
+      )}
       {!needle && cat === 'favorites' && <div className="hint lib-hint">Your starred templates. Hover a card and click the heart to add or remove.</div>}
       {needle && (
         <div className="hint lib-hint">

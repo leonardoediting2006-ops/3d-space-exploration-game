@@ -3092,6 +3092,44 @@ kbd {
   right: 8px;
 }
 
+/* ---------------------------------------------------------------- preset import / export / sync */
+.preset-bar {
+  margin: 0 0 10px;
+}
+.preset-actions {
+  display: flex;
+  gap: 6px;
+}
+.preset-actions button.mini {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.preset-actions button.mini.on {
+  color: var(--good);
+  border-color: rgba(94, 203, 140, 0.4);
+}
+.sync-line {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.sync-line.error,
+.sync-line.needs-permission {
+  color: var(--key);
+}
+.sync-line.ok {
+  color: var(--good);
+}
+button.link {
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* ---------------------------------------------------------------- narrower windows */
 @media (max-width: 1440px) {
   .comp-info {
