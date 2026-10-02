@@ -1,0 +1,292 @@
+import { uid } from './ids';
+import type { Ease, Keyframe, NamedEase, Prop, PropValue } from './types';
+
+export type Bezier = [number, number, number, number];
+export const EASY_EASE: Bezier = [0.33, 0, 0.67, 1];
+export const EASE_IN: Bezier = [0.42, 0, 1, 1];
+export const EASE_OUT: Bezier = [0, 0, 0.58, 1];
+
+/** Solve a CSS-style cubic bezier (0,0)-(x1,y1)-(x2,y2)-(1,1) for y at the given x. */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bx = (t: number) => 3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t;
+  const by = (t: number) => 3 * (1 - t) * (1 - t) * t * y1 + 3 * (1 - t) * t * t * y2 + t * t * t;
+  const dbx = (t: number) =>
+    3 * (1 - t) * (1 - t) * x1 + 6 * (1 - t) * t * (x2 - x1) + 3 * t * t * (1 - x2);
+  let t = x;
+  for (let i = 0; i < 8; i++) {
+    const err = bx(t) - x;
+    if (Math.abs(err) < 1e-6) return by(t);
+    const d = dbx(t);
+    if (Math.abs(d) < 1e-6) break;
+    t -= err / d;
+  }
+  let lo = 0;
+  let hi = 1;
+  t = x;
+  for (let i = 0; i < 40; i++) {
+    const err = bx(t) - x;
+    if (Math.abs(err) < 1e-6) break;
+    if (err > 0) hi = t;
+    else lo = t;
+    t = (lo + hi) / 2;
+  }
+  return by(t);
+}
+
+const bounceOut = (p: number): number => {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (p < 1 / d1) return n1 * p * p;
+  if (p < 2 / d1) return n1 * (p -= 1.5 / d1) * p + 0.75;
+  if (p < 2.5 / d1) return n1 * (p -= 2.25 / d1) * p + 0.9375;
+  return n1 * (p -= 2.625 / d1) * p + 0.984375;
+};
+const elasticOut = (p: number): number => (p <= 0 ? 0 : p >= 1 ? 1 : 2 ** (-10 * p) * Math.sin(((p * 10 - 0.75) * (2 * Math.PI)) / 3) + 1);
+const inOut = (out: (p: number) => number) => (p: number) => (p < 0.5 ? (1 - out(1 - 2 * p)) / 2 : (1 + out(2 * p - 1)) / 2);
+const steps = (n: number) => (p: number) => Math.min(1, Math.floor(Math.max(0, p) * n) / (n - 1));
+
+/** Named curves as functions of normalised time. Each maps 0→0 and 1→1 (overshoot allowed in between). */
+export const NAMED_EASE_FNS: Record<NamedEase, (p: number) => number> = {
+  bounceOut,
+  bounceIn: (p) => 1 - bounceOut(1 - p),
+  bounceInOut: inOut(bounceOut),
+  elasticOut,
+  elasticIn: (p) => 1 - elasticOut(1 - p),
+  elasticInOut: inOut(elasticOut),
+  springOut: (p) => (p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-6 * p) * Math.cos(11 * p)),
+  steps4: steps(4),
+  steps8: steps(8),
+  steps16: steps(16),
+};
+
+/** The reverse of a named curve when keyframes are time-reversed. */
+export const NAMED_EASE_REVERSE: Record<NamedEase, NamedEase> = {
+  bounceOut: 'bounceIn',
+  bounceIn: 'bounceOut',
+  bounceInOut: 'bounceInOut',
+  elasticOut: 'elasticIn',
+  elasticIn: 'elasticOut',
+  elasticInOut: 'elasticInOut',
+  springOut: 'elasticIn',
+  steps4: 'steps4',
+  steps8: 'steps8',
+  steps16: 'steps16',
+};
+
+export function easeProgress(ease: Ease, u: number): number {
+  if (ease === 'linear') return u;
+  if (ease === 'hold') return 0;
+  if (typeof ease === 'string') return NAMED_EASE_FNS[ease](u);
+  return cubicBezier(ease[0], ease[1], ease[2], ease[3], u);
+}
+
+export function lerpValue(a: PropValue, b: PropValue, u: number): PropValue {
+  if (typeof a === 'number' && typeof b === 'number') return a + (b - a) * u;
+  const aa = a as number[];
+  const bb = b as number[];
+  return aa.map((v, i) => v + ((bb[i] ?? v) - v) * u);
+}
+
+function hash(n: number): number {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** Smooth 1-D value noise in 0..1. */
+export function noise1(x: number): number {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * (3 - 2 * f);
+  return hash(i) * (1 - u) + hash(i + 1) * u;
+}
+
+function loopTime(keys: Keyframe[], t: number, mode: 'cycle' | 'pingpong'): number {
+  const t0 = keys[0].t;
+  const t1 = keys[keys.length - 1].t;
+  const d = t1 - t0;
+  if (d <= 0 || t <= t1) return t;
+  const over = t - t0;
+  const k = Math.floor(over / d);
+  const r = over - k * d;
+  if (mode === 'cycle') return t0 + r;
+  return t0 + (k % 2 === 0 ? r : d - r);
+}
+
+/* ---- spatial interpolation (curved motion paths) ---- */
+
+const LUT_STEPS = 24;
+interface SpatialSegment {
+  sig: string;
+  to: Keyframe;
+  pts: [number, number, number, number, number, number, number, number];
+  cum: Float64Array; // cumulative arc length at t = i / LUT_STEPS
+}
+const spatialCache = new WeakMap<Keyframe, SpatialSegment>();
+
+function bez(p: SpatialSegment['pts'], t: number): [number, number] {
+  const m = 1 - t;
+  const a = m * m * m;
+  const b = 3 * m * m * t;
+  const c = 3 * m * t * t;
+  const d = t * t * t;
+  return [a * p[0] + b * p[2] + c * p[4] + d * p[6], a * p[1] + b * p[3] + c * p[5] + d * p[7]];
+}
+
+function spatialSegment(k0: Keyframe, k1: Keyframe): SpatialSegment | null {
+  const a = k0.v as number[];
+  const b = k1.v as number[];
+  const so = k0.sOut;
+  const si = k1.sIn;
+  if (!(so && (so[0] !== 0 || so[1] !== 0)) && !(si && (si[0] !== 0 || si[1] !== 0))) return null;
+  const pts: SpatialSegment['pts'] = [a[0], a[1], a[0] + (so?.[0] ?? 0), a[1] + (so?.[1] ?? 0), b[0] + (si?.[0] ?? 0), b[1] + (si?.[1] ?? 0), b[0], b[1]];
+  const sig = pts.join(',');
+  const hit = spatialCache.get(k0);
+  if (hit && hit.to === k1 && hit.sig === sig) return hit;
+  const cum = new Float64Array(LUT_STEPS + 1);
+  let prev = bez(pts, 0);
+  for (let i = 1; i <= LUT_STEPS; i++) {
+    const q = bez(pts, i / LUT_STEPS);
+    cum[i] = cum[i - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1]);
+    prev = q;
+  }
+  const seg: SpatialSegment = { sig, to: k1, pts, cum };
+  spatialCache.set(k0, seg);
+  return seg;
+}
+
+/** Point a fraction `p` of the way along the curve's length (so linear easing means constant speed). */
+function alongSpatial(seg: SpatialSegment, p: number): [number, number] {
+  const total = seg.cum[LUT_STEPS];
+  const target = Math.min(1, Math.max(0, p)) * total;
+  let lo = 0;
+  let hi = LUT_STEPS;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (seg.cum[mid] <= target) lo = mid;
+    else hi = mid;
+  }
+  const span = seg.cum[hi] - seg.cum[lo];
+  const f = span > 0 ? (target - seg.cum[lo]) / span : 0;
+  return bez(seg.pts, (lo + f) / LUT_STEPS);
+}
+
+/**
+ * How far a segment travels: the signed change for a number, the length of the path for a position
+ * (so a curved motion path counts its arc length). Speed along the segment is this over its duration.
+ */
+export function segmentExtent(k0: Keyframe, k1: Keyframe, kind: Prop['kind']): number {
+  if (kind === 'number') return (k1.v as number) - (k0.v as number);
+  if (kind === 'vec2') {
+    const seg = spatialSegment(k0, k1);
+    if (seg) return seg.cum[LUT_STEPS];
+    const a = k0.v as number[];
+    const b = k1.v as number[];
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  return 0;
+}
+
+/** The keyframed (or static) value, ignoring wiggle. */
+export function baseValue(prop: Prop, t: number): PropValue {
+  const keys = prop.keys;
+  if (keys.length === 0) return prop.value;
+  if (keys.length === 1) return keys[0].v;
+  const tt = prop.loop ? loopTime(keys, t, prop.loop) : t;
+  if (tt <= keys[0].t) return keys[0].v;
+  const last = keys[keys.length - 1];
+  if (tt >= last.t) return last.v;
+  // binary search for the segment containing tt
+  let lo = 0;
+  let hi = keys.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (keys[mid].t <= tt) lo = mid;
+    else hi = mid;
+  }
+  const k0 = keys[lo];
+  const k1 = keys[hi];
+  if (k0.ease === 'hold') return k0.v;
+  const u = (tt - k0.t) / (k1.t - k0.t);
+  const progress = easeProgress(k0.ease, u);
+  if (prop.kind === 'vec2') {
+    const seg = spatialSegment(k0, k1);
+    if (seg) return alongSpatial(seg, progress);
+  }
+  return lerpValue(k0.v, k1.v, progress);
+}
+
+/** Full value of a property at comp time t, including wiggle and clamping. */
+export function evalProp(prop: Prop, t: number): PropValue {
+  let v = baseValue(prop, t);
+  if (prop.kind === 'path' || prop.kind === 'gradient') return v;
+  if (prop.wiggle && prop.wiggle.amp !== 0) {
+    const { freq, amp, seed } = prop.wiggle;
+    const n = (axis: number) => (noise1(t * freq + seed * 17.3 + axis * 101.7) * 2 - 1) * amp;
+    v = typeof v === 'number' ? v + n(0) : v.map((x, i) => x + n(i));
+  }
+  if (typeof v === 'number') return clampValue(prop, v);
+  if (prop.kind === 'color') return v.map((x) => Math.min(255, Math.max(0, x)));
+  return v;
+}
+
+function clampValue(prop: Prop, v: number): number {
+  if (prop.min !== undefined && v < prop.min) return prop.min;
+  if (prop.max !== undefined && v > prop.max) return prop.max;
+  return v;
+}
+
+export const num = (v: PropValue): number => (typeof v === 'number' ? v : v[0]);
+export const vec = (v: PropValue): [number, number] =>
+  typeof v === 'number' ? [v, v] : [v[0], v[1] ?? v[0]];
+
+/** Evaluate and coerce to a number / vec2 / rgb triple. */
+export const evalNum = (p: Prop, t: number): number => num(evalProp(p, t));
+export const evalVec = (p: Prop, t: number): [number, number] => vec(evalProp(p, t));
+export const evalColor = (p: Prop, t: number): [number, number, number] => {
+  const v = evalProp(p, t) as number[];
+  return [v[0] ?? 0, v[1] ?? 0, v[2] ?? 0];
+};
+
+export const cssColor = (c: number[], alpha = 1): string =>
+  `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${alpha})`;
+
+/* ------------------------------------------------------------------ keyframe editing */
+
+export function sortKeys(prop: Prop): void {
+  prop.keys.sort((a, b) => a.t - b.t);
+}
+
+export function keyNear(prop: Prop, t: number, tol: number): Keyframe | undefined {
+  return prop.keys.find((k) => Math.abs(k.t - t) <= tol);
+}
+
+/** Add or update a keyframe at time t. */
+export function setKeyAt(prop: Prop, t: number, v: PropValue, tol: number, ease: Ease = 'linear'): Keyframe {
+  const existing = keyNear(prop, t, tol);
+  if (existing) {
+    existing.v = Array.isArray(v) ? [...v] : v;
+    return existing;
+  }
+  const k: Keyframe = { id: uid('k'), t, v: Array.isArray(v) ? [...v] : v, ease };
+  prop.keys.push(k);
+  sortKeys(prop);
+  return k;
+}
+
+/** Turn the stopwatch on (one keyframe at t holding the current value) or off (static value). */
+export function setAnimated(prop: Prop, animated: boolean, t: number): void {
+  if (animated) {
+    if (prop.keys.length === 0) {
+      prop.keys.push({ id: uid('k'), t, v: Array.isArray(prop.value) ? [...prop.value] : prop.value, ease: 'linear' });
+    }
+  } else {
+    if (prop.keys.length > 0) {
+      const v = baseValue(prop, t);
+      prop.value = Array.isArray(v) ? [...v] : v;
+    }
+    prop.keys = [];
+    delete prop.loop;
+  }
+}

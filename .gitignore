@@ -1,7 +1,5 @@
-node_modules/
-dist/
-*.tsbuildinfo
-.env*
-.hoplite/artifacts/
-playwright-report/
-test-results/
+node_modules
+dist
+*.local
+.DS_Store
+.scratch/

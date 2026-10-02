@@ -3,5 +3,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  server: { host: '0.0.0.0', port: 5173 },
+  server: { host: true },
+  // One editor page: React, the renderer and the 333-template library ship together (about 180 KB gzipped).
+  build: { chunkSizeWarningLimit: 700 },
 });
