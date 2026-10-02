@@ -57,6 +57,7 @@ import { useTimeIf } from './fields';
 import { dropLibraryItem, LIB_MIME } from '../state/templateActions';
 import { findLibraryItem } from '../templates';
 import { Icon, LAYER_ICON } from './Icon';
+import { GraphEditor } from './GraphEditor';
 import { PropEditor } from './PropEditor';
 
 const COLUMNS_W = 300;
@@ -214,6 +215,7 @@ export function Timeline() {
   const playing = useApp((s) => s.playing);
   const snapOn = useApp((s) => s.snap);
   const showColumns = useApp((s) => s.showColumns);
+  const graphOpen = useApp((s) => s.graphOpen);
   const tlLeft = useApp((s) => s.tlLeft);
   const leftW = tlLeft + (showColumns ? COLUMNS_W : 0);
   const rows = useMemo(() => buildRows(comp, expanded, showOnly), [comp, expanded, showOnly]);
@@ -401,26 +403,36 @@ export function Timeline() {
         <button className={`tl-toggle ${snapOn ? 'on' : ''}`} title="Snap layer edges and keyframes to the playhead and other layers (hold Alt to bypass)" onClick={() => appStore.set({ snap: !snapOn })} data-testid="snap-toggle">
           <Icon name="anchor" size={14} /> Snap
         </button>
-        <button className={`tl-toggle ${showColumns ? 'on' : ''}`} title="Show blend mode, track matte and parent columns" onClick={() => appStore.set({ showColumns: !showColumns })} data-testid="columns-toggle">
-          <Icon name="layers" size={14} /> Columns
-        </button>
+        {!graphOpen && (
+          <button className={`tl-toggle ${showColumns ? 'on' : ''}`} title="Show blend mode, track matte and parent columns" onClick={() => appStore.set({ showColumns: !showColumns })} data-testid="columns-toggle">
+            <Icon name="layers" size={14} /> Columns
+          </button>
+        )}
         <span className="tl-spacer" />
-        <button className="icon-btn" title="Fit the timeline to the window" onClick={fitWidth}>
-          <Icon name="fit" size={14} />
+        <button className={`tl-toggle ${graphOpen ? 'on' : ''}`} title="Graph Editor: see and shape every curve (Shift+F3)" onClick={() => appStore.set({ graphOpen: !graphOpen })} data-testid="graph-toggle">
+          <Icon name="ease" size={14} /> Graph
         </button>
-        <input
-          className="tl-zoom"
-          type="range"
-          min={Math.log(8)}
-          max={Math.log(800)}
-          step={0.01}
-          value={Math.log(pps)}
-          title="Zoom timeline"
-          onChange={(e) => appStore.set({ pps: Math.exp(Number(e.target.value)) })}
-        />
+        {!graphOpen && (
+          <>
+            <button className="icon-btn" title="Fit the timeline to the window" onClick={fitWidth}>
+              <Icon name="fit" size={14} />
+            </button>
+            <input
+              className="tl-zoom"
+              type="range"
+              min={Math.log(8)}
+              max={Math.log(800)}
+              step={0.01}
+              value={Math.log(pps)}
+              title="Zoom timeline"
+              onChange={(e) => appStore.set({ pps: Math.exp(Number(e.target.value)) })}
+            />
+          </>
+        )}
       </div>
 
-      <div className="tl-main" style={{ gridTemplateColumns: `${leftW}px 1fr`, gridTemplateRows: `${RULER_H}px 1fr` }}>
+      {graphOpen && <GraphEditor comp={comp} />}
+      <div className="tl-main" hidden={graphOpen} style={{ gridTemplateColumns: `${leftW}px 1fr`, gridTemplateRows: `${RULER_H}px 1fr` }}>
         <div className="tl-corner">
           <span className="corner-name">Layers</span>
           {showColumns && (

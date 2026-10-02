@@ -58,6 +58,7 @@ export function MenuBar() {
   const leftOpen = useApp((s) => s.leftOpen);
   const previewOnApply = useApp((s) => s.previewOnApply);
   const columns = useApp((s) => s.showColumns);
+  const graphOpen = useApp((s) => s.graphOpen);
 
   useEffect(() => {
     const close = (e: PointerEvent) => {
@@ -158,6 +159,7 @@ export function MenuBar() {
       { label: 'Preview Animations When Applied', checked: previewOnApply, run: () => appStore.set({ previewOnApply: !previewOnApply }) },
       { label: 'Project Panel', checked: leftOpen, run: () => appStore.set({ leftOpen: !leftOpen }) },
       { label: 'Timeline Columns (blend, matte, parent)', checked: columns, run: () => appStore.set({ showColumns: !columns }) },
+      { label: 'Graph Editor', shortcut: 'Shift+F3', checked: graphOpen, run: () => appStore.set({ graphOpen: !graphOpen }) },
       { sep: true },
       { label: 'Go to Start', shortcut: 'Home', run: () => setTime(0) },
       { label: 'Go to End', shortcut: 'End', run: () => setTime(activeComp().duration) },

@@ -132,6 +132,8 @@ export function buildCommands(): Command[] {
   add('View', s.checkerboard ? 'Hide transparency grid' : 'Show transparency grid', () => appStore.set({ checkerboard: !s.checkerboard }));
   add('View', s.safeMargins ? 'Hide safe margins' : 'Show safe margins', () => appStore.set({ safeMargins: !s.safeMargins }), { keywords: 'guides' });
   add('View', s.showColumns ? 'Hide timeline columns' : 'Show timeline columns (blend, matte, parent)', () => appStore.set({ showColumns: !s.showColumns }));
+  add('View', s.graphOpen ? 'Hide Graph Editor' : 'Show Graph Editor', () => appStore.set({ graphOpen: !s.graphOpen }), { hint: 'Shift+F3', keywords: 'curves speed graph easing bezier' });
+  add('View', 'Show speed graph', () => appStore.set({ graphOpen: true, graphMode: 'speed' }), { keywords: 'velocity influence graph editor' });
   add('View', s.leftOpen ? 'Hide project panel' : 'Show project panel', () => appStore.set({ leftOpen: !s.leftOpen }), { keywords: 'footage compositions' });
   add('View', 'Show Inspector', () => appStore.set({ rightTab: 'inspector' }), { keywords: 'properties' });
   add('View', 'Show Library', () => appStore.set({ rightTab: 'library' }), { keywords: 'templates presets' });

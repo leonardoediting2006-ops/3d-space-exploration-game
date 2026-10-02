@@ -657,6 +657,18 @@ export function moveKeys(ids: string[], dt: number): void {
   });
 }
 
+/** Give several keyframes each their own outgoing easing, as one undo step (the Graph Editor's handles). */
+export function setKeyEases(updates: { id: string; ease: Ease }[]): void {
+  if (!updates.length) return;
+  const byId = new Map(updates.map((u) => [u.id, u.ease]));
+  commit((p) => {
+    for (const l of p.comps[S().activeCompId].layers) for (const prop of layerProps(l)) for (const k of prop.keys) if (byId.has(k.id)) {
+      const e = byId.get(k.id) as Ease;
+      k.ease = Array.isArray(e) ? ([...e] as Ease) : e;
+    }
+  });
+}
+
 export function setKeysEase(ids: string[], ease: Ease): void {
   const compId = S().activeCompId;
   const sel = new Set(ids);

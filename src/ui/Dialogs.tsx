@@ -334,6 +334,7 @@ const SHORTCUTS: [string, string][] = [
   ['V  H  Z  Q  G  Y', 'Selection, Hand, Zoom, Shape, Pen and Anchor-point tools'],
   ['Arrow keys', 'Nudge selected layers (Shift = 10 px)'],
   ['F9 / Shift+F9 / Ctrl+Shift+F9', 'Easy ease / ease in / ease out the selected keyframes'],
+  ['Shift+F3', 'Show or hide the Graph Editor (value and speed graphs)'],
   ['Ctrl+C / X / V', 'Copy / cut / paste layers or keyframes (pasted at the playhead)'],
   ['Ctrl+D', 'Duplicate layers'],
   ['Ctrl+Shift+D', 'Split the selected layers at the playhead'],

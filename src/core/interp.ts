@@ -172,6 +172,22 @@ function alongSpatial(seg: SpatialSegment, p: number): [number, number] {
   return bez(seg.pts, (lo + f) / LUT_STEPS);
 }
 
+/**
+ * How far a segment travels: the signed change for a number, the length of the path for a position
+ * (so a curved motion path counts its arc length). Speed along the segment is this over its duration.
+ */
+export function segmentExtent(k0: Keyframe, k1: Keyframe, kind: Prop['kind']): number {
+  if (kind === 'number') return (k1.v as number) - (k0.v as number);
+  if (kind === 'vec2') {
+    const seg = spatialSegment(k0, k1);
+    if (seg) return seg.cum[LUT_STEPS];
+    const a = k0.v as number[];
+    const b = k1.v as number[];
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
+  }
+  return 0;
+}
+
 /** The keyframed (or static) value, ignoring wiggle. */
 export function baseValue(prop: Prop, t: number): PropValue {
   const keys = prop.keys;

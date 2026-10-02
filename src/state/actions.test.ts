@@ -613,3 +613,28 @@ describe('editing several layers at once', () => {
 function timeAt(t: number): void {
   timeStore.set({ t });
 }
+
+describe('graph editor actions', () => {
+  it('sets several keyframes\' easings in one undo step, copying the curve', () => {
+    const id = A.addSolid({ name: 'G' });
+    timeStore.set({ t: 0 });
+    A.toggleStopwatch(id, 'transform', 'rotation');
+    timeStore.set({ t: 1 });
+    A.setPropValue(id, 'transform', 'rotation', 90);
+    timeStore.set({ t: 2 });
+    A.setPropValue(id, 'transform', 'rotation', 10);
+    const keys = layers()[0].transform.rotation.keys;
+    const before = appStore.get().undoCount;
+    const curve: [number, number, number, number] = [0.2, 0.4, 0.6, 0.8];
+    A.setKeyEases([{ id: keys[0].id, ease: curve }, { id: keys[1].id, ease: [0.5, 0, 0.5, 1] }]);
+    expect(appStore.get().undoCount).toBe(before + 1);
+    const after = layers()[0].transform.rotation.keys;
+    expect(after[0].ease).toEqual(curve);
+    expect(after[0].ease).not.toBe(curve);
+    expect(after[1].ease).toEqual([0.5, 0, 0.5, 1]);
+    undo();
+    expect(layers()[0].transform.rotation.keys[0].ease).toBe('linear');
+    A.setKeyEases([]);
+    expect(appStore.get().undoCount).toBe(before);
+  });
+});

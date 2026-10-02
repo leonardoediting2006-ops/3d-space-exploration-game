@@ -70,6 +70,14 @@ export interface AppState {
   snap: boolean;
   /** Play an animation once when it is applied from the Library or a picker. */
   previewOnApply: boolean;
+  /** The timeline shows the Graph Editor instead of the layer bars. */
+  graphOpen: boolean;
+  graphMode: 'value' | 'speed';
+  /** Each curve fills the graph's height, instead of all sharing one value axis. */
+  graphNormalize: boolean;
+  graphScope: 'selected' | 'all';
+  /** Dragging a speed handle changes the speed on both sides of the keyframe. */
+  graphLink: boolean;
 
   playing: boolean;
   loopPlayback: boolean;
@@ -124,6 +132,11 @@ export const appStore = createStore<AppState>({
   tlHeight: typeof window === 'undefined' ? 330 : Math.round(Math.min(330, Math.max(210, window.innerHeight * 0.34))),
   snap: true,
   previewOnApply: true,
+  graphOpen: false,
+  graphMode: 'value',
+  graphNormalize: true,
+  graphScope: 'selected',
+  graphLink: true,
   playing: false,
   loopPlayback: true,
   zoom: 'fit',

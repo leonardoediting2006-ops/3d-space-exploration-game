@@ -3092,6 +3092,219 @@ kbd {
   right: 8px;
 }
 
+/* ---------------------------------------------------------------- graph editor */
+.tl-main[hidden] {
+  display: none;
+}
+.graph {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.graph-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  flex: none;
+  border-bottom: 1px solid var(--line);
+}
+.graph-bar .chip {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.graph-bar .chip:disabled {
+  opacity: 0.4;
+}
+.graph-bar .seg button {
+  min-width: 52px;
+}
+.graph-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+.graph-channels {
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding: 6px 0 12px;
+}
+.gc-layer {
+  padding: 8px 12px 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 12px;
+  cursor: default;
+  color: var(--dim);
+  font-size: 12px;
+}
+.gc-row:hover {
+  background: var(--panel-2);
+}
+.gc-row.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.gc-row.off {
+  opacity: 0.5;
+}
+.gc-eye {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 6px;
+  border: 2px solid;
+}
+.gc-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gc-comps {
+  font-size: 10px;
+  color: var(--faint);
+}
+.graph-plot {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.graph-svg {
+  display: block;
+  user-select: none;
+  touch-action: none;
+}
+.g-bg {
+  fill: transparent;
+  cursor: crosshair;
+}
+.g-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.g-grid.zero {
+  stroke: var(--line-2);
+}
+.g-dim {
+  fill: rgba(0, 0, 0, 0.25);
+}
+.g-ruler {
+  fill: var(--panel-2);
+  cursor: ew-resize;
+}
+.g-tick {
+  stroke: var(--line-2);
+}
+.g-label {
+  fill: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.g-unit {
+  fill: var(--faint);
+  font-size: 10px;
+}
+.g-curve {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  opacity: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+.g-curve.second {
+  stroke-dasharray: 5 3;
+}
+.g-channel.active .g-curve {
+  stroke-width: 2.4;
+  opacity: 1;
+}
+.g-key {
+  fill: var(--panel);
+  stroke: currentColor;
+  stroke-width: 2;
+  cursor: grab;
+}
+.g-key.sel {
+  fill: currentColor;
+  stroke: #fff;
+}
+.g-key.second {
+  stroke-dasharray: 2 2;
+}
+.g-keys:not(.active) .g-key {
+  opacity: 0.8;
+}
+.g-handle-line {
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+.g-handle {
+  fill: var(--panel);
+  stroke: currentColor;
+  stroke-width: 2;
+  cursor: grab;
+}
+.g-handle:hover {
+  fill: currentColor;
+}
+.g-marquee {
+  fill: var(--accent-soft);
+  stroke: var(--accent-line);
+  stroke-dasharray: 4 3;
+}
+.g-playhead {
+  stroke: var(--playhead);
+  stroke-width: 1.4;
+}
+.g-playhead-cap {
+  fill: var(--playhead);
+}
+.graph-empty {
+  position: absolute;
+  inset: 40px 0 0 54px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 12px;
+  pointer-events: none;
+}
+.graph-readout {
+  position: absolute;
+  left: 60px;
+  bottom: 4px;
+  right: 12px;
+  color: var(--dim);
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------------------------------------------------------------- editing several layers at once */
 .mixed-text {
   color: var(--faint);

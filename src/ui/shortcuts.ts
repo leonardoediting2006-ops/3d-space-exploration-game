@@ -161,6 +161,11 @@ export function installShortcuts(): () => void {
         prevent();
         applyKeyEase(s.selKeys, e.shiftKey ? 'in' : 'both');
         return;
+      case 'F3':
+        if (!e.shiftKey) return;
+        prevent();
+        appStore.set({ graphOpen: !s.graphOpen });
+        return;
       case 'BracketLeft':
       case 'BracketRight': {
         if (!sel.length) return;
