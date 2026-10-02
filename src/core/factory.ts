@@ -87,7 +87,7 @@ function baseLayer(type: LayerType, data: LayerData, o: BaseOpts, content: Recor
     id: uid('layer'),
     name: o.name,
     type,
-    label: ({ solid: 0, shape: 1, text: 2, image: 3, precomp: 5, null: 6, adjustment: 7 } as const)[type],
+    label: ({ solid: 0, shape: 1, text: 2, image: 3, video: 4, audio: 4, precomp: 5, null: 6, adjustment: 7 } as const)[type],
     start: o.time,
     inPoint: o.time,
     outPoint: Math.max(o.time + 1 / o.comp.fps, o.comp.duration),
@@ -185,6 +185,28 @@ export function createText(o: BaseOpts & { text: string }): Layer {
 
 export function createImageLayer(o: BaseOpts & { assetId: string; width: number; height: number }): Layer {
   return baseLayer('image', { type: 'image', assetId: o.assetId }, { ...o, anchor: [o.width / 2, o.height / 2] }, {});
+}
+
+/** Volume (100 % = as recorded) and pan: the properties of anything that makes sound. */
+export function audioProps(): Record<string, Prop> {
+  return {
+    volume: makeProp('number', 'Volume', 100, { unit: '%', min: 0, max: 200, step: 1, decimals: 0 }),
+    pan: makeProp('number', 'Pan', 0, { unit: '%', min: -100, max: 100, step: 1, decimals: 0 }),
+  };
+}
+
+/** A sound clip on the timeline. `time` is where its first sample plays; it lasts `duration` seconds (or until the composition ends). */
+export function createAudioLayer(o: BaseOpts & { assetId: string; duration: number }): Layer {
+  const l = baseLayer('audio', { type: 'audio', assetId: o.assetId }, { ...o, anchor: [0, 0] }, audioProps());
+  l.outPoint = Math.max(o.time + 1 / o.comp.fps, Math.min(o.comp.duration, o.time + o.duration));
+  return l;
+}
+
+/** A video clip. Its sound (when it has any) mixes like an audio layer's. */
+export function createVideoLayer(o: BaseOpts & { assetId: string; width: number; height: number; duration: number; hasAudio: boolean }): Layer {
+  const l = baseLayer('video', { type: 'video', assetId: o.assetId }, { ...o, anchor: [o.width / 2, o.height / 2] }, o.hasAudio ? audioProps() : {});
+  l.outPoint = Math.max(o.time + 1 / o.comp.fps, Math.min(o.comp.duration, o.time + o.duration));
+  return l;
 }
 
 export function createPrecompLayer(o: BaseOpts & { compId: string; sub: Comp }): Layer {

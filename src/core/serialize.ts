@@ -87,6 +87,7 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
   str(l.id, `${what} id`);
   for (const k of ['start', 'inPoint', 'outPoint', 'label'] as const) if (!isNum(l[k])) fail(`${what}.${k}`);
   for (const k of ['visible', 'solo', 'locked', 'motionBlur'] as const) if (typeof l[k] !== 'boolean') fail(`${what}.${k}`);
+  if (l.muted !== undefined && typeof l.muted !== 'boolean') fail(`${what}.muted`);
   if (l.parentId !== null && typeof l.parentId !== 'string') fail(`${what}.parentId`);
   if (!BLEND_MODES.some((b) => b.id === l.blend)) fail(`${what}.blend`);
   if (!MATTE_MODES.some((m) => m.id === l.matte)) fail(`${what}.matte`);
@@ -155,8 +156,14 @@ function checkLayer(l: unknown, projectAssets: Record<string, unknown>, compIds:
       if (String(d.font).length > 200) fail(`${what} font`);
       break;
     case 'image':
+    case 'video':
+    case 'audio': {
       if (typeof d.assetId !== 'string' || !(d.assetId in projectAssets)) fail(`${what} references missing footage`);
+      const asset = projectAssets[d.assetId as string];
+      if (!isObj(asset) || (asset.kind ?? 'image') !== l.type) fail(`${what} points at footage of the wrong kind`);
+      if (d.type !== l.type) fail(`${what}.data.type`);
       break;
+    }
     case 'precomp':
       if (typeof d.compId !== 'string' || !compIds.has(d.compId)) fail(`${what} references a missing composition`);
       break;
@@ -209,11 +216,17 @@ export function parseProject(text: string): { project: Project; assets: Record<s
   const assets: Record<string, string> = {};
   for (const [id, a] of Object.entries(p.assets as Record<string, unknown>)) {
     if (!isObj(a)) return fail('footage entry');
-    numIn(a.width, 'footage width', 1, 32768);
-    numIn(a.height, 'footage height', 1, 32768);
+    const kind = a.kind === undefined ? 'image' : a.kind;
+    if (kind !== 'image' && kind !== 'video' && kind !== 'audio') fail('footage kind');
+    numIn(a.width, 'footage width', kind === 'audio' ? 0 : 1, 32768);
+    numIn(a.height, 'footage height', kind === 'audio' ? 0 : 1, 32768);
     str(a.name, 'footage name');
+    if (a.duration !== undefined) numIn(a.duration, 'footage duration', 0, 86400);
+    if (a.fps !== undefined) numIn(a.fps, 'footage frame rate', 0, 1000);
+    if (a.hasAudio !== undefined && typeof a.hasAudio !== 'boolean') fail('footage audio flag');
     const url = rawAssets[id];
-    if (typeof url !== 'string' || !/^data:image\/(png|jpeg|gif|webp|svg\+xml|bmp);/i.test(url)) fail(`footage "${a.name}" has no valid image data`);
+    const okUrl = typeof url === 'string' && (kind === 'image' ? /^data:image\/(png|jpeg|gif|webp|svg\+xml|bmp);/i.test(url) : new RegExp(`^data:${kind}/[a-z0-9.+-]+[;,]`, 'i').test(url));
+    if (!okUrl) fail(`footage "${a.name}" has no valid ${kind} data`);
     assets[id] = url as string;
   }
 

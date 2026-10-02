@@ -57,6 +57,7 @@ import { useTimeIf } from './fields';
 import { dropLibraryItem, LIB_MIME } from '../state/templateActions';
 import { findLibraryItem } from '../templates';
 import { Icon, LAYER_ICON } from './Icon';
+import { Waveform } from './Waveform';
 import { GraphEditor } from './GraphEditor';
 import { PropEditor } from './PropEditor';
 
@@ -216,6 +217,7 @@ export function Timeline() {
   const snapOn = useApp((s) => s.snap);
   const showColumns = useApp((s) => s.showColumns);
   const graphOpen = useApp((s) => s.graphOpen);
+  const audioOn = useApp((s) => s.audioOn);
   const tlLeft = useApp((s) => s.tlLeft);
   const leftW = tlLeft + (showColumns ? COLUMNS_W : 0);
   const rows = useMemo(() => buildRows(comp, expanded, showOnly), [comp, expanded, showOnly]);
@@ -399,6 +401,9 @@ export function Timeline() {
           data-testid="comp-motion-blur"
         >
           <Icon name="motionBlur" size={14} /> Motion blur
+        </button>
+        <button className={`tl-toggle ${audioOn ? 'on' : ''}`} title={audioOn ? 'Sound is on during playback' : 'Sound is off during playback'} onClick={() => appStore.set({ audioOn: !audioOn })} data-testid="audio-toggle">
+          <Icon name={audioOn ? 'volume' : 'volumeOff'} size={14} /> Sound
         </button>
         <button className={`tl-toggle ${snapOn ? 'on' : ''}`} title="Snap layer edges and keyframes to the playhead and other layers (hold Alt to bypass)" onClick={() => appStore.set({ snap: !snapOn })} data-testid="snap-toggle">
           <Icon name="anchor" size={14} /> Snap
@@ -667,7 +672,7 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onS
   const parents = comp.layers.filter((l) => l.id !== layer.id);
   return (
     <div
-      className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''} ${layer.visible ? '' : 'is-hidden'} ${libOver ? 'lib-over' : ''}`}
+      className={`layer-left ${selected ? 'sel' : ''} ${dropAbove ? 'drop' : ''} ${layer.visible && !(layer.type === 'audio' && layer.muted) ? '' : 'is-hidden'} ${libOver ? 'lib-over' : ''}`}
       data-layer-index={index}
       onPointerDown={onSelect}
       onDragOver={(e) => {
@@ -718,18 +723,27 @@ function LayerLeft({ layer, index, comp, selected, open, dropAbove, columns, onS
         </span>
       )}
       <span className="switches">
-        <button className={`sw mb ${layer.motionBlur ? 'on' : ''}`} title="Motion blur" onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} data-testid={`mb-${index}`}>
-          <Icon name="motionBlur" size={13} />
-        </button>
+        {layer.type !== 'audio' && (
+          <button className={`sw mb ${layer.motionBlur ? 'on' : ''}`} title="Motion blur" onClick={() => setLayerField(layer.id, { motionBlur: !layer.motionBlur })} data-testid={`mb-${index}`}>
+            <Icon name="motionBlur" size={13} />
+          </button>
+        )}
         <button className={`sw solo ${layer.solo ? 'on' : ''}`} title="Solo" onClick={() => setLayerField(layer.id, { solo: !layer.solo })}>
           <Icon name="solo" size={12} />
         </button>
         <button className={`sw lock ${layer.locked ? 'on' : ''}`} title="Lock" onClick={() => setLayerField(layer.id, { locked: !layer.locked })}>
           <Icon name={layer.locked ? 'lock' : 'unlock'} size={13} />
         </button>
-        <button className={`sw eye ${layer.visible ? 'on' : 'off'}`} title={layer.visible ? 'Hide' : 'Show'} onClick={() => setLayerField(layer.id, { visible: !layer.visible })}>
-          <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
-        </button>
+        {(layer.type === 'audio' || layer.type === 'video') && (
+          <button className={`sw speaker ${layer.muted ? 'off' : 'on'}`} title={layer.muted ? 'Unmute' : 'Mute'} onClick={() => setLayerField(layer.id, { muted: !layer.muted })} data-testid={`mute-${index}`}>
+            <Icon name={layer.muted ? 'volumeOff' : 'volume'} size={14} />
+          </button>
+        )}
+        {layer.type !== 'audio' && (
+          <button className={`sw eye ${layer.visible ? 'on' : 'off'}`} title={layer.visible ? 'Hide' : 'Show'} onClick={() => setLayerField(layer.id, { visible: !layer.visible })}>
+            <Icon name={layer.visible ? 'eye' : 'eyeOff'} size={14} />
+          </button>
+        )}
       </span>
       {columns && (
         <>
@@ -860,6 +874,7 @@ function PropLeft({ row, onMenu }: { row: Extract<Row, { kind: 'prop' }>; onMenu
 
 function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp: Comp; pps: number; selected: boolean; onSelect: (e: React.MouseEvent) => void }) {
   const color = LABEL_COLORS[layer.label % LABEL_COLORS.length];
+  const audioId = layer.data.type === 'audio' ? layer.data.assetId : null;
   const ids = () => (selected ? appStore.get().selection : [layer.id]);
   const snap = (dt: number) => snapToFrame(dt, comp.fps);
 
@@ -897,7 +912,8 @@ function LayerBar({ layer, comp, pps, selected, onSelect }: { layer: Layer; comp
     borderColor: `${color}b3`,
   };
   return (
-    <div className={`layer-bar ${selected ? 'sel' : ''} ${layer.locked ? 'locked' : ''} ${layer.visible ? '' : 'hidden'}`} style={style} onPointerDown={dragBody} data-testid="layer-bar">
+    <div className={`layer-bar ${audioId ? 'audio' : ''} ${selected ? 'sel' : ''} ${layer.locked ? 'locked' : ''} ${layer.visible && !layer.muted ? '' : 'hidden'}`} style={style} onPointerDown={dragBody} data-testid="layer-bar">
+      {audioId && <Waveform assetId={audioId} from={layer.inPoint - layer.start} to={layer.outPoint - layer.start} width={Math.max(4, (layer.outPoint - layer.inPoint) * pps - 2)} height={ROW_LAYER - 8} />}
       <i className="edge l" onPointerDown={(e) => dragEdge(e, 'in')} />
       <span className="bar-name">{layer.name}</span>
       <i className="edge r" onPointerDown={(e) => dragEdge(e, 'out')} />

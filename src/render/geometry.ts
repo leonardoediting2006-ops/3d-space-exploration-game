@@ -75,10 +75,13 @@ export function localBounds(project: Project, layer: Layer, t: number): Rect | n
     }
     case 'text':
       return textBounds(layer, t);
-    case 'image': {
+    case 'image':
+    case 'video': {
       const a = project.assets[d.assetId];
       return a ? { x: 0, y: 0, w: a.width, h: a.height } : { x: 0, y: 0, w: 200, h: 200 };
     }
+    case 'audio':
+      return null;
     case 'precomp': {
       const c = project.comps[d.compId];
       return c ? { x: 0, y: 0, w: c.width, h: c.height } : null;

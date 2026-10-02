@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { ShapeKind } from '../core/types';
-import { addAdjustment, addFootageLayer, addNull, addShape, addText, closeCompTab, importFiles, openComp, openDialog } from '../state/actions';
+import { addAdjustment, addFootageLayer, addNull, addShape, addText, closeCompTab, FOOTAGE_ACCEPT, importFiles, openComp, openDialog } from '../state/actions';
 import { activeComp, appStore, useApp, type Tool } from '../state/store';
 import { Icon, type IconName } from './Icon';
 import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
@@ -83,7 +83,7 @@ export function Toolbar() {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={FOOTAGE_ACCEPT}
           multiple
           hidden
           onChange={async (e) => {

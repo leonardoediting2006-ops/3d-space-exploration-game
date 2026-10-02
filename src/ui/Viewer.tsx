@@ -28,6 +28,7 @@ import {
   addShape,
   addText,
   importFiles,
+  FOOTAGE_ACCEPT,
   insertPathVertex,
   deleteLayers,
   selectKeys,
@@ -1300,7 +1301,7 @@ function EmptyState() {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={FOOTAGE_ACCEPT}
           multiple
           hidden
           onChange={async (e) => {

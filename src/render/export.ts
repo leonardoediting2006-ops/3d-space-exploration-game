@@ -1,6 +1,8 @@
 import { ArrayBufferTarget as Mp4Target, Muxer as Mp4Muxer } from 'mp4-muxer';
 import { ArrayBufferTarget as WebmTarget, Muxer as WebmMuxer } from 'webm-muxer';
+import { compHasSound, limit, mixComp, peakOf } from '../core/mix';
 import type { Comp, Project } from '../core/types';
+import { getAssetClip, MIX_RATE } from './assets';
 import { renderComp } from './renderer';
 import { makeZip } from './zip';
 
@@ -12,6 +14,8 @@ export interface ExportRange {
 export interface ExportOptions {
   scale: number;
   range: ExportRange;
+  /** Mix the composition's sound into video files (default on, when there is any). */
+  audio?: boolean;
   onProgress?: (fraction: number) => void;
   signal?: AbortSignal;
 }
@@ -82,6 +86,29 @@ export async function videoSupport(comp: Comp, scale = 1): Promise<Record<VideoF
   return out;
 }
 
+const AUDIO_BITRATE = 160_000;
+const AUDIO_CHUNK = 4800; // 100 ms at 48 kHz
+
+/** The audio codec this browser can encode for the container: AAC for MP4 where it can, Opus otherwise. */
+async function pickAudioCodec(format: VideoFormat): Promise<{ codec: string; mux: 'opus' | 'aac' } | null> {
+  if (typeof AudioEncoder === 'undefined' || typeof AudioData === 'undefined') return null;
+  const tries: { codec: string; mux: 'opus' | 'aac' }[] = format === 'mp4' ? [{ codec: 'mp4a.40.2', mux: 'aac' }, { codec: 'opus', mux: 'opus' }] : [{ codec: 'opus', mux: 'opus' }];
+  for (const t of tries) {
+    try {
+      const r = await AudioEncoder.isConfigSupported({ codec: t.codec, sampleRate: MIX_RATE, numberOfChannels: 2, bitrate: AUDIO_BITRATE });
+      if (r.supported) return t;
+    } catch {
+      /* try the next one */
+    }
+  }
+  return null;
+}
+
+/** Can sound be encoded into this kind of file here? (The export dialog warns when it cannot.) */
+export async function audioSupport(format: VideoFormat): Promise<boolean> {
+  return (await pickAudioCodec(format)) !== null;
+}
+
 /** Frame-accurate offline render → WebCodecs → muxed file. Never drops or duplicates frames. */
 export async function exportVideo(
   project: Project,
@@ -98,8 +125,28 @@ export async function exportVideo(
   const support = await VideoEncoder.isConfigSupported(cfg);
   if (!support.supported) throw new Error(`This browser cannot encode ${format.toUpperCase()} at ${w}×${h}.`);
 
-  const webm = format === 'webm' ? new WebmMuxer({ target: new WebmTarget(), video: { codec: 'V_VP9', width: w, height: h, frameRate: comp.fps } }) : null;
-  const mp4 = format === 'mp4' ? new Mp4Muxer({ target: new Mp4Target(), video: { codec: 'avc', width: w, height: h }, fastStart: 'in-memory' }) : null;
+  const n = frameCount(o.range, comp.fps);
+
+  // sound: mix the whole range up front, then feed it to the encoder alongside the frames
+  let mix: [Float32Array, Float32Array] | null = null;
+  let audioCodec: Awaited<ReturnType<typeof pickAudioCodec>> = null;
+  if ((o.audio ?? true) && compHasSound(project, comp)) {
+    audioCodec = await pickAudioCodec(format);
+    if (audioCodec) {
+      mix = mixComp(project, comp, { start: o.range.start, end: o.range.start + n / comp.fps, sampleRate: MIX_RATE, clip: getAssetClip });
+      limit(mix);
+      if (peakOf(mix) < 1e-6) mix = null;
+    }
+  }
+
+  const webm =
+    format === 'webm'
+      ? new WebmMuxer({ target: new WebmTarget(), video: { codec: 'V_VP9', width: w, height: h, frameRate: comp.fps }, ...(mix ? { audio: { codec: 'A_OPUS', numberOfChannels: 2, sampleRate: MIX_RATE } } : {}) })
+      : null;
+  const mp4 =
+    format === 'mp4'
+      ? new Mp4Muxer({ target: new Mp4Target(), video: { codec: 'avc', width: w, height: h }, ...(mix && audioCodec ? { audio: { codec: audioCodec.mux, numberOfChannels: 2, sampleRate: MIX_RATE } } : {}), fastStart: 'in-memory' })
+      : null;
 
   let failure: Error | null = null;
   const encoder = new VideoEncoder({
@@ -113,7 +160,37 @@ export async function exportVideo(
   });
   encoder.configure(cfg);
 
-  const n = frameCount(o.range, comp.fps);
+  let audioEncoder: AudioEncoder | null = null;
+  if (mix && audioCodec) {
+    audioEncoder = new AudioEncoder({
+      output: (chunk, meta) => {
+        if (webm) webm.addAudioChunk(chunk, meta);
+        else mp4!.addAudioChunk(chunk, meta);
+      },
+      error: (e) => {
+        failure = e;
+      },
+    });
+    audioEncoder.configure({ codec: audioCodec.codec, sampleRate: MIX_RATE, numberOfChannels: 2, bitrate: AUDIO_BITRATE });
+  }
+  let audioFed = 0;
+  /** Hand the encoder sound up to `seconds` into the file. */
+  const feedAudio = (seconds: number) => {
+    if (!mix || !audioEncoder) return;
+    const total = mix[0].length;
+    const upto = Math.min(total, Math.round(seconds * MIX_RATE));
+    while (audioFed < upto) {
+      const len = Math.min(AUDIO_CHUNK, total - audioFed);
+      const data = new Float32Array(len * 2);
+      data.set(mix[0].subarray(audioFed, audioFed + len), 0);
+      data.set(mix[1].subarray(audioFed, audioFed + len), len);
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: MIX_RATE, numberOfFrames: len, numberOfChannels: 2, timestamp: Math.round((audioFed / MIX_RATE) * 1_000_000), data });
+      audioEncoder.encode(ad);
+      ad.close();
+      audioFed += len;
+    }
+  };
+
   const canvas = document.createElement('canvas');
   const fit = document.createElement('canvas');
   fit.width = w;
@@ -132,14 +209,18 @@ export async function exportVideo(
       const frame = new VideoFrame(source, { timestamp: Math.round(i * us), duration: Math.round(us) });
       encoder.encode(frame, { keyFrame: i % 60 === 0 });
       frame.close();
+      feedAudio((i + 1) / comp.fps + 0.5);
       while (encoder.encodeQueueSize > 8) await yieldToUI();
       o.onProgress?.((i + 1) / n);
       if (i % 2 === 0) await yieldToUI();
     }
+    feedAudio(Infinity);
     await encoder.flush();
+    if (audioEncoder) await audioEncoder.flush();
     if (failure) throw failure;
   } finally {
     if (encoder.state !== 'closed') encoder.close();
+    if (audioEncoder && audioEncoder.state !== 'closed') audioEncoder.close();
   }
   if (webm) {
     webm.finalize();

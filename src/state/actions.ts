@@ -21,7 +21,9 @@ import {
   createMask,
   createPathShape,
   starterMaskPath,
+  createAudioLayer,
   createImageLayer,
+  createVideoLayer,
   createNull,
   createPrecompLayer,
   createProject,
@@ -57,7 +59,8 @@ import type {
   Vec2,
   Wiggle,
 } from '../core/types';
-import { allAssetData, clearAssets, imageSize, readFileAsDataUrl, setAssetData } from '../render/assets';
+import { allAssetData, clearAssets, decodeAudio, imageSize, readFileAsDataUrl, setAssetData, setAudioAsset } from '../render/assets';
+import { startAudio, stopAudio } from '../render/playback';
 import { layerMap, layerPolygon, localBounds, parentWorld } from '../render/geometry';
 import { downloadBlob } from '../render/export';
 import { appStore, activeComp, commit, resetHistory, timeStore, toast } from './store';
@@ -68,11 +71,17 @@ const keyTol = (comp: Comp) => 0.25 / comp.fps;
 
 /* ------------------------------------------------------------------ navigation */
 
-export function setTime(t: number): void {
+function setTimeRaw(t: number): void {
   const comp = activeComp();
   const frame = 1 / comp.fps;
   const next = clamp(snapToFrame(t, comp.fps), 0, Math.max(0, comp.duration - frame));
   if (next !== now()) timeStore.set({ t: next });
+}
+
+/** Move the playhead. While playing, this is a seek: playback (and its sound) carries on from the new spot. */
+export function setTime(t: number): void {
+  setTimeRaw(t);
+  if (S().playing && !preview) restartPlayback();
 }
 
 export const stepFrames = (n: number): void => setTime(now() + n / activeComp().fps);
@@ -93,6 +102,23 @@ export function goToKeyframe(dir: 1 | -1): void {
 let raf = 0;
 let playWall = 0;
 let playFrom = 0;
+
+/** Where playback ends for the active composition. */
+const playEnd = (comp: Comp): number => (comp.workEnd > comp.workStart ? comp.workEnd : comp.duration);
+
+/** (Re)start the sound from the playhead, and hold the playhead back by however long the sound takes to start. */
+function startSound(from: number): void {
+  const s = S();
+  if (!s.audioOn) return void stopAudio();
+  const lead = startAudio(s.project, activeComp(s), from, playEnd(activeComp(s)));
+  playWall += lead * 1000;
+}
+
+function restartPlayback(): void {
+  playWall = performance.now();
+  playFrom = now();
+  startSound(playFrom);
+}
 /** A one-off preview: where to stop, and where the playhead goes back to afterwards. */
 let preview: { stopAt: number; returnTo: number } | null = null;
 
@@ -104,7 +130,7 @@ function tick(wall: number): void {
   if (preview && t >= preview.stopAt) {
     const back = preview.returnTo;
     pause();
-    setTime(back);
+    setTimeRaw(back);
     return;
   }
   if (t >= end - 1e-6) {
@@ -112,13 +138,14 @@ function tick(wall: number): void {
       playWall = wall;
       playFrom = comp.workStart;
       t = comp.workStart;
+      startSound(t);
     } else {
       pause();
-      setTime(end - 1 / comp.fps);
+      setTimeRaw(end - 1 / comp.fps);
       return;
     }
   }
-  setTime(t);
+  setTimeRaw(t);
   raf = requestAnimationFrame(tick);
 }
 
@@ -150,11 +177,13 @@ export function play(): void {
   appStore.set({ playing: true });
   playWall = performance.now();
   playFrom = now();
+  startSound(playFrom);
   raf = requestAnimationFrame(tick);
 }
 
 export function pause(): void {
   cancelAnimationFrame(raf);
+  stopAudio();
   preview = null;
   if (S().playing) appStore.set({ playing: false });
 }
@@ -346,6 +375,11 @@ export function addFootageLayer(assetId: string, position?: Vec2): string | null
   const a = S().project.assets[assetId];
   if (!a) return null;
   const t = now();
+  const name = a.name.replace(/\.[a-z0-9]{1,5}$/i, '');
+  if (a.kind === 'audio') return insertLayer((comp) => createAudioLayer({ name, comp, time: t, assetId, duration: a.duration ?? comp.duration }));
+  if (a.kind === 'video') {
+    return insertLayer((comp) => createVideoLayer({ name, comp, time: t, assetId, width: a.width, height: a.height, duration: a.duration ?? comp.duration, hasAudio: !!a.hasAudio, position }));
+  }
   return insertLayer((comp) => createImageLayer({ name: a.name, comp, time: t, assetId, width: a.width, height: a.height, position }));
 }
 
@@ -443,7 +477,7 @@ export function duplicateLayers(ids: string[]): void {
   appStore.set({ selection: created, selKeys: [] });
 }
 
-type LayerFlags = Partial<Pick<Layer, 'name' | 'visible' | 'solo' | 'locked' | 'motionBlur' | 'label'>> & {
+type LayerFlags = Partial<Pick<Layer, 'name' | 'visible' | 'solo' | 'locked' | 'muted' | 'motionBlur' | 'label'>> & {
   blend?: BlendMode;
   matte?: MatteMode;
 };
@@ -535,8 +569,12 @@ export function trimLayer(id: string, edge: 'in' | 'out', t: number): void {
     const l = comp.layers.find((x) => x.id === id);
     if (!l) return;
     const frame = 1 / comp.fps;
-    if (edge === 'in') l.inPoint = clamp(snapToFrame(t, comp.fps), 0, l.outPoint - frame);
-    else l.outPoint = clamp(snapToFrame(t, comp.fps), l.inPoint + frame, Math.max(comp.duration, l.outPoint));
+    // sound and video cannot play before their first frame or past their last
+    const length = 'assetId' in l.data && (l.data.type === 'audio' || l.data.type === 'video') ? p.assets[l.data.assetId]?.duration : undefined;
+    const earliest = length === undefined ? 0 : Math.max(0, l.start);
+    const latest = length === undefined ? Math.max(comp.duration, l.outPoint) : Math.min(l.start + length, Math.max(comp.duration, l.outPoint));
+    if (edge === 'in') l.inPoint = clamp(snapToFrame(t, comp.fps), earliest, l.outPoint - frame);
+    else l.outPoint = clamp(snapToFrame(t, comp.fps), l.inPoint + frame, Math.max(latest, l.inPoint + frame));
   });
 }
 
@@ -781,25 +819,71 @@ export function moveEffects(targets: EffectTarget[], dir: -1 | 1): void {
 
 /* ------------------------------------------------------------------ footage */
 
+/** What the import dialogs offer: pictures, sound and video. */
+export const FOOTAGE_ACCEPT = 'image/*,audio/*,video/*,.mp3,.wav,.ogg,.oga,.opus,.m4a,.aac,.flac,.mp4,.m4v,.webm,.mov,.ogv,.mkv';
+const AUDIO_EXT: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', weba: 'audio/webm' };
+const VIDEO_EXT: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', ogv: 'video/ogg', mkv: 'video/x-matroska' };
+const MAX_AUDIO_SECONDS = 20 * 60;
+
+/** What kind of footage a file is, and a MIME type to store it under (browsers leave the type empty for some extensions). */
+export function footageKind(file: { name: string; type: string }): { kind: 'image' | 'audio' | 'video'; mime: string } | null {
+  const ext = file.name.toLowerCase().split('.').pop() ?? '';
+  if (file.type.startsWith('image/')) return { kind: 'image', mime: file.type };
+  if (file.type.startsWith('audio/')) return { kind: 'audio', mime: file.type };
+  if (file.type.startsWith('video/')) return { kind: 'video', mime: file.type };
+  if (AUDIO_EXT[ext]) return { kind: 'audio', mime: AUDIO_EXT[ext] };
+  if (VIDEO_EXT[ext]) return { kind: 'video', mime: VIDEO_EXT[ext] };
+  return null;
+}
+
+async function importAudio(file: File, mime: string): Promise<string> {
+  const bytes = await file.arrayBuffer();
+  let buffer: AudioBuffer;
+  try {
+    buffer = await decodeAudio(bytes);
+  } catch {
+    throw new Error(`This browser cannot decode "${file.name}". Try a WAV, MP3, Ogg or AAC file.`);
+  }
+  if (buffer.duration > MAX_AUDIO_SECONDS) throw new Error(`"${file.name}" is longer than ${MAX_AUDIO_SECONDS / 60} minutes, which is more sound than the editor can hold in memory.`);
+  const url = await readFileAsDataUrl(new Blob([bytes], { type: mime }));
+  const id = uid('asset');
+  setAudioAsset(id, url, buffer);
+  commit((p) => {
+    p.assets[id] = { id, name: file.name, kind: 'audio', width: 0, height: 0, duration: buffer.duration };
+    p.assetOrder.push(id);
+  });
+  return id;
+}
+
+async function importImage(file: File): Promise<string> {
+  const url = await readFileAsDataUrl(file);
+  const { width, height } = await imageSize(url);
+  const id = uid('asset');
+  await setAssetData(id, url);
+  commit((p) => {
+    p.assets[id] = { id, name: file.name, kind: 'image', width, height };
+    p.assetOrder.push(id);
+  });
+  return id;
+}
+
 export async function importFiles(files: File[]): Promise<string[]> {
   const ids: string[] = [];
   for (const file of files) {
-    if (!file.type.startsWith('image/')) {
-      toast(`"${file.name}" is not an image — only images can be imported.`);
+    const info = footageKind(file);
+    if (!info) {
+      toast(`"${file.name}" is not an image, sound or video file.`);
       continue;
     }
     try {
-      const url = await readFileAsDataUrl(file);
-      const { width, height } = await imageSize(url);
-      const id = uid('asset');
-      await setAssetData(id, url);
-      commit((p) => {
-        p.assets[id] = { id, name: file.name, kind: 'image', width, height };
-        p.assetOrder.push(id);
-      });
-      ids.push(id);
-    } catch {
-      toast(`Could not import "${file.name}".`);
+      if (info.kind === 'image') ids.push(await importImage(file));
+      else if (info.kind === 'audio') ids.push(await importAudio(file, info.mime));
+      else {
+        const { importVideo } = await import('./importVideo');
+        ids.push(await importVideo(file, info.mime));
+      }
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : `Could not import "${file.name}".`);
     }
   }
   appStore.set({ assetVersion: S().assetVersion + 1 });
@@ -810,7 +894,7 @@ export function deleteAsset(id: string): void {
   commit((p) => {
     delete p.assets[id];
     p.assetOrder = p.assetOrder.filter((x) => x !== id);
-    for (const c of Object.values(p.comps)) c.layers = c.layers.filter((l) => !(l.data.type === 'image' && l.data.assetId === id));
+    for (const c of Object.values(p.comps)) c.layers = c.layers.filter((l) => !('assetId' in l.data && l.data.assetId === id));
   });
 }
 

@@ -117,3 +117,30 @@ export async function writeTestPng(file, w = 320, h = 200) {
     Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]),
   );
 }
+
+/** Write a PCM16 WAV file: a sine tone per channel (a frequency of 0 leaves that channel silent). */
+export function writeTestWav(file, { seconds = 2, freqs = [440], amp = 0.5, sampleRate = 44100 } = {}) {
+  const channels = freqs.length;
+  const frames = Math.round(seconds * sampleRate);
+  const data = Buffer.alloc(frames * channels * 2);
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channels; c++) {
+      const v = freqs[c] ? Math.sin((2 * Math.PI * freqs[c] * i) / sampleRate) * amp : 0;
+      data.writeInt16LE(Math.round(v * 32767), (i * channels + c) * 2);
+    }
+  }
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0);
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write('WAVEfmt ', 8);
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20);
+  head.writeUInt16LE(channels, 22);
+  head.writeUInt32LE(sampleRate, 24);
+  head.writeUInt32LE(sampleRate * channels * 2, 28);
+  head.writeUInt16LE(channels * 2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write('data', 36);
+  head.writeUInt32LE(data.length, 40);
+  fs.writeFileSync(file, Buffer.concat([head, data]));
+}

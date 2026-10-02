@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
 import { timecode } from '../core/time';
 import { getAssetData } from '../render/assets';
-import { addFootageLayer, addPrecompLayer, deleteAsset, deleteComp, importFiles, openComp, openDialog } from '../state/actions';
+import { addFootageLayer, addPrecompLayer, deleteAsset, deleteComp, FOOTAGE_ACCEPT, importFiles, openComp, openDialog } from '../state/actions';
 import { appStore, useApp } from '../state/store';
 import { Icon } from './Icon';
+import { Waveform } from './Waveform';
+
+const durationText = (s?: number) => (s === undefined ? '' : s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : `${s.toFixed(1)} s`);
 
 export function ProjectPanel() {
   const project = useApp((s) => s.project);
@@ -23,7 +26,7 @@ export function ProjectPanel() {
           <button className="icon-btn" title="New composition" onClick={() => openDialog({ kind: 'compSettings', compId: null })}>
             <Icon name="comp" size={14} />
           </button>
-          <button className="icon-btn" title="Import images" onClick={() => fileRef.current?.click()}>
+          <button className="icon-btn" title="Import footage: images, sound or video" onClick={() => fileRef.current?.click()} data-testid="import-footage">
             <Icon name="image" size={14} />
           </button>
           <button
@@ -46,7 +49,7 @@ export function ProjectPanel() {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={FOOTAGE_ACCEPT}
           multiple
           hidden
           onChange={async (e) => {
@@ -83,12 +86,20 @@ export function ProjectPanel() {
           const url = getAssetData(id);
           return (
             <div key={id} className={`item ${sel === id ? 'sel' : ''}`} onClick={() => setSel(id)} onDoubleClick={() => addFootageLayer(id)} title="Double-click to add to the composition">
-              <span className="thumb">{url ? <img src={url} alt="" /> : <Icon name="image" size={16} />}</span>
+              <span className={`thumb ${a.kind}`}>
+                {a.kind === 'audio' ? (
+                  <Waveform assetId={id} from={0} to={a.duration ?? 0} width={40} height={30} color="rgba(127,158,255,0.9)" />
+                ) : a.kind === 'video' ? (
+                  <Icon name="film" size={16} />
+                ) : url ? (
+                  <img src={url} alt="" />
+                ) : (
+                  <Icon name="image" size={16} />
+                )}
+              </span>
               <span className="meta">
                 <b>{a.name}</b>
-                <small>
-                  {a.width}×{a.height} image
-                </small>
+                <small>{a.kind === 'audio' ? `sound · ${durationText(a.duration)}` : a.kind === 'video' ? `${a.width}×${a.height} video · ${durationText(a.duration)}${a.hasAudio ? ' · sound' : ''}` : `${a.width}×${a.height} image`}</small>
               </span>
               <button className="icon-btn" title="Add to the active composition" onClick={(e) => (e.stopPropagation(), addFootageLayer(id))}>
                 <Icon name="plus" size={13} />
@@ -96,7 +107,7 @@ export function ProjectPanel() {
             </div>
           );
         })}
-        {project.assetOrder.length === 0 && <div className="hint">Drop images here, or use the image button above, to add footage.</div>}
+        {project.assetOrder.length === 0 && <div className="hint">Drop images, sound or video here, or use the import button above.</div>}
       </div>
     </div>
   );

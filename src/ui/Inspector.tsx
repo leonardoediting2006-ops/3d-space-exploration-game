@@ -53,6 +53,7 @@ import { MenuPopover, useAnchor, type MenuEntry } from './Popover';
 import { EffectPicker } from './Pickers';
 import { commonContentKeys, commonOf, sharedEffects, type Member, type SharedEffect } from './multi';
 import { PropRow } from './PropRow';
+import { Waveform } from './Waveform';
 import { Field, Section } from './Section';
 
 type CompLite = Pick<Comp, 'fps' | 'width' | 'height' | 'duration'>;
@@ -73,31 +74,74 @@ const peersOf = (layers: Layer[], pick: (l: Layer) => { group: PropGroup; prop: 
     return prop ? [{ layer, group, prop }] : [];
   });
 
-function LayerInspector({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+function LayerInspector({ layers: selected, comp }: { layers: Layer[]; comp: Comp }) {
+  // sound-only layers have no picture, so the picture sections skip them
+  const audioOnly = selected.every((l) => l.type === 'audio');
+  const layers = audioOnly ? selected : selected.filter((l) => l.type !== 'audio');
+  const sound = selected.filter((l) => l.content.volume);
   const layer = layers[0];
   const d = layer.data;
   const multi = layers.length > 1;
   const ids = layers.map((l) => l.id);
   return (
     <div className="inspector" data-testid="inspector">
-      <LayerHeader layers={layers} />
-      <AlignBar ids={ids} />
+      <LayerHeader layers={selected} />
+      {!audioOnly && <AlignBar ids={ids} />}
 
-      <Section id="transform" title="Transform" actions={<ResetTransformButton ids={ids} />}>
-        {(['position', 'scale', 'rotation', 'opacity', 'anchor'] as const).map((k) => (
-          <PropRow key={k} layer={layer} comp={comp} group="transform" propKey={k} prop={layer.transform[k]} label={k === 'anchor' ? 'Anchor' : undefined} peers={peersOf(layers, (l) => ({ group: 'transform', prop: l.transform[k] }))} />
-        ))}
-      </Section>
+      {!audioOnly && (
+        <Section id="transform" title="Transform" actions={<ResetTransformButton ids={ids} />}>
+          {(['position', 'scale', 'rotation', 'opacity', 'anchor'] as const).map((k) => (
+            <PropRow key={k} layer={layer} comp={comp} group="transform" propKey={k} prop={layer.transform[k]} label={k === 'anchor' ? 'Anchor' : undefined} peers={peersOf(layers, (l) => ({ group: 'transform', prop: l.transform[k] }))} />
+          ))}
+        </Section>
+      )}
 
-      <SourceSection layers={layers} comp={comp} />
-      <AnimateSection layers={layers} comp={comp} />
-      <EffectsSection layers={layers} comp={comp} />
-      {!multi && d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
-      {!multi && d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
-      {!multi && d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
+      {sound.length > 0 && <SoundSection layers={sound} comp={comp} />}
+      {!audioOnly && <SourceSection layers={layers} comp={comp} />}
+      {!audioOnly && <AnimateSection layers={layers} comp={comp} />}
+      {!audioOnly && <EffectsSection layers={layers} comp={comp} />}
+      {!audioOnly && !multi && d.type === 'text' && <AnimatorsSection layer={layer} comp={comp} />}
+      {!audioOnly && !multi && d.type === 'shape' && <TrimSection layer={layer} comp={comp} />}
+      {!audioOnly && !multi && d.type !== 'null' && <MasksSection layer={layer} comp={comp} />}
       <LayerSection layers={layers} comp={comp} />
-      {multi && <div className="hint compact multi-note">Keyframe curves, letter animators, masks and trim paths are edited one layer at a time. Click a layer's name above to focus it.</div>}
+      {selected.length > 1 && <div className="hint compact multi-note">Keyframe curves, letter animators, masks and trim paths are edited one layer at a time. Click a layer's name above to focus it.</div>}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ sound */
+
+const clock = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+
+/** Volume, pan and mute for layers that make sound (audio layers, and video with a sound track). */
+function SoundSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
+  const layer = layers[0];
+  const ids = layers.map((l) => l.id);
+  const allMuted = layers.every((l) => l.muted);
+  const project = useApp((s) => s.project);
+  const a = layer.data.type === 'audio' || layer.data.type === 'video' ? project.assets[layer.data.assetId] : undefined;
+  return (
+    <Section id="sound" title="Sound">
+      {layers.length === 1 && a && (
+        <div className="sound-info" data-testid="sound-info">
+          <div className="sound-name" title={a.name}>
+            {a.name}
+          </div>
+          <small>{a.duration ? `${clock(a.duration)} long` : ''}</small>
+          {layer.data.type === 'audio' && <Waveform assetId={layer.data.assetId} from={layer.inPoint - layer.start} to={layer.outPoint - layer.start} width={300} height={44} color="rgba(127,158,255,0.9)" className="sound-wave" />}
+        </div>
+      )}
+      {['volume', 'pan'].map((k) => (
+        <PropRow key={k} layer={layer} comp={comp} group="content" propKey={k} prop={layer.content[k]} peers={peersOf(layers, (l) => ({ group: 'content', prop: l.content[k] }))} />
+      ))}
+      <Field label="Mute">
+        <div className="chips">
+          <Chip on={allMuted} onClick={() => setLayerField(ids, { muted: !allMuted })} title="Leave this sound out of the preview and the export" testId="mute-toggle">
+            {allMuted ? 'Muted' : 'Mute'}
+          </Chip>
+        </div>
+      </Field>
+    </Section>
   );
 }
 
@@ -115,6 +159,8 @@ function LayerHeader({ layers }: { layers: Layer[] }) {
     if (n && n !== layer.name) setLayerField(layer.id, { name: n });
     else setName(layer.name);
   };
+  const soundOnly = layers.every((l) => l.type === 'audio');
+  const allMutedHere = layers.every((l) => l.muted);
   const allVisible = layers.every((l) => l.visible);
   const allLocked = layers.every((l) => l.locked);
   const entries: MenuEntry[] = [
@@ -159,9 +205,15 @@ function LayerHeader({ layers }: { layers: Layer[] }) {
           />
         </>
       )}
-      <button className={`icon-btn ${allVisible ? '' : 'off'}`} title={allVisible ? 'Hide layer' : 'Show layer'} onClick={() => setLayerField(ids, { visible: !allVisible })} data-testid="ins-visible">
-        <Icon name={allVisible ? 'eye' : 'eyeOff'} />
-      </button>
+      {soundOnly ? (
+        <button className={`icon-btn ${allMutedHere ? 'off' : ''}`} title={allMutedHere ? 'Unmute' : 'Mute'} onClick={() => setLayerField(ids, { muted: !allMutedHere })} data-testid="ins-visible">
+          <Icon name={allMutedHere ? 'volumeOff' : 'volume'} />
+        </button>
+      ) : (
+        <button className={`icon-btn ${allVisible ? '' : 'off'}`} title={allVisible ? 'Hide layer' : 'Show layer'} onClick={() => setLayerField(ids, { visible: !allVisible })} data-testid="ins-visible">
+          <Icon name={allVisible ? 'eye' : 'eyeOff'} />
+        </button>
+      )}
       <button className={`icon-btn ${allLocked ? 'on' : ''}`} title={allLocked ? 'Unlock layer' : 'Lock layer'} onClick={() => setLayerField(ids, { locked: !allLocked })}>
         <Icon name={allLocked ? 'lock' : 'unlock'} />
       </button>
@@ -307,7 +359,7 @@ function hiddenContentKeys(layer: Layer): Set<string> {
   return hidden;
 }
 
-const SOURCE_TITLE: Record<string, string> = { text: 'Text', shape: 'Shape', solid: 'Solid', image: 'Image', precomp: 'Composition', adjustment: 'Adjustment' };
+const SOURCE_TITLE: Record<string, string> = { text: 'Text', shape: 'Shape', solid: 'Solid', image: 'Image', video: 'Video', precomp: 'Composition', adjustment: 'Adjustment' };
 
 function SourceSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
   const layer = layers[0];
@@ -320,7 +372,7 @@ function SourceSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
 
   // a property is hidden only if no selected layer needs it
   const hidden = new Set([...hiddenContentKeys(layer)].filter((k) => layers.every((l) => hiddenContentKeys(l).has(k))));
-  const keys = (multi ? commonContentKeys(layers) : Object.keys(layer.content)).filter((k) => !hidden.has(k));
+  const keys = (multi ? commonContentKeys(layers) : Object.keys(layer.content)).filter((k) => !hidden.has(k) && k !== 'volume' && k !== 'pan');
   const rows = keys.map((k) => (
     <PropRow key={k} layer={layer} comp={comp} group="content" propKey={k} prop={layer.content[k]} peers={peersOf(layers, (l) => ({ group: 'content', prop: l.content[k] }))} />
   ));
@@ -439,7 +491,7 @@ function SourceSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
           </button>
         </Field>
       )}
-      {!multi && d.type === 'image' && <div className="hint compact">Footage layer.</div>}
+      {!multi && (d.type === 'image' || d.type === 'video') && <div className="hint compact">Footage layer.</div>}
       {sameType && d.type === 'adjustment' && <div className="hint compact">Effects on {multi ? 'these layers' : 'this layer'} change everything beneath {multi ? 'them' : 'it'}.</div>}
       {rows}
     </Section>
@@ -708,8 +760,10 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
   const blend = commonOf(layers, (l) => l.blend);
   const allBlur = layers.every((l) => l.motionBlur);
   const allSolo = layers.every((l) => l.solo);
+  const soundOnly = layers.every((l) => l.type === 'audio');
   return (
-    <Section id="layer" title="Layer" defaultFolded>
+    <Section id="layer" title="Layer" defaultFolded={!soundOnly}>
+      {!soundOnly && (
       <Field label="Blend">
         <select className="mini-select wide" value={blend.mixed ? '' : blend.value} onChange={(e) => setLayerField(ids, { blend: e.target.value as BlendMode })} data-testid="ins-blend">
           {blend.mixed && (
@@ -724,8 +778,10 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
           ))}
         </select>
       </Field>
+      )}
       {!multi && (
         <>
+          {!soundOnly && (
           <Field label="Matte" title="Use the layer above as a matte">
             <select className="mini-select wide" disabled={index === 0} value={layer.matte} onChange={(e) => setLayerField(layer.id, { matte: e.target.value as MatteMode })}>
               {MATTE_MODES.map((m) => (
@@ -735,6 +791,8 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
               ))}
             </select>
           </Field>
+          )}
+          {!soundOnly && (
           <Field label="Parent" title="This layer follows its parent's movement">
             <select className="mini-select wide" value={layer.parentId ?? ''} onChange={(e) => setParent(layer.id, e.target.value || null)}>
               <option value="">None</option>
@@ -745,6 +803,7 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
               ))}
             </select>
           </Field>
+          )}
           <Field label="Timing">
             <span className="vec">
               <NumberField value={layer.inPoint} min={0} step={step} decimals={2} unit="s" onChange={(v) => trimLayer(layer.id, 'in', v)} title="First visible moment" />
@@ -756,9 +815,11 @@ function LayerSection({ layers, comp }: { layers: Layer[]; comp: Comp }) {
       )}
       <Field label="Switches">
         <div className="chips">
-          <Chip on={allBlur} onClick={() => setLayerField(ids, { motionBlur: !allBlur })} title="Motion blur (also needs Motion Blur on in the timeline)">
-            Motion blur
-          </Chip>
+          {!soundOnly && (
+            <Chip on={allBlur} onClick={() => setLayerField(ids, { motionBlur: !allBlur })} title="Motion blur (also needs Motion Blur on in the timeline)">
+              Motion blur
+            </Chip>
+          )}
           <Chip on={allSolo} onClick={() => setLayerField(ids, { solo: !allSolo })} title="Show only soloed layers">
             Solo
           </Chip>

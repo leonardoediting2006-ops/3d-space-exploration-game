@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { open } from './lib.mjs';
+import { open, writeTestWav } from './lib.mjs';
 
 const { page, check, finish, OUT } = await open({ electron: true });
 
@@ -98,6 +98,42 @@ try {
     check('dialog export downloads Intro.mp4', dl.suggestedFilename() === 'Intro.mp4', dl.suggestedFilename());
     const n = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=codec_name,nb_read_frames', '-of', 'default=nw=1:nk=1', saved]).toString().trim().split('\n');
     check('dialog export is H.264 with 15 frames (half a second)', n[0] === 'h264' && n[1] === '15', n.join(' '));
+
+    // 4) sound in an MP4: AAC where the browser can encode it, Opus otherwise
+    const tone = path.join(OUT, 'tone.wav');
+    writeTestWav(tone, { seconds: 1, freqs: [440], amp: 0.5 });
+    await page.setInputFiles('[data-testid=project-panel] input[type=file]', tone);
+    await page.waitForTimeout(900);
+    await page.evaluate(() => {
+      const ks = window.__ks;
+      ks.actions.setTime(0);
+      const id = Object.values(ks.appStore.get().project.assets).find((a) => a.kind === 'audio').id;
+      ks.actions.addFootageLayer(id);
+      ks.actions.setWorkArea(0, 1);
+    });
+    const withSound = path.join(OUT, 'with-sound.mp4');
+    fs.writeFileSync(
+      withSound,
+      await toBuffer(async () => {
+        const m = await import('/src/render/export.ts');
+        const s = window.__ks.appStore.get();
+        const blob = await m.exportVideo(s.project, s.project.comps[s.activeCompId], 'mp4', 3_000_000, { scale: 0.25, range: { start: 0, end: 1 } });
+        const u8 = new Uint8Array(await blob.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+        return btoa(bin);
+      }),
+    );
+    const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,codec_type', '-of', 'csv=p=0', withSound]).toString().trim().split('\n');
+    check('the MP4 has an H.264 video track and an audio track (AAC or Opus)', streams.some((x) => /^h264,video/.test(x)) && streams.some((x) => /^(aac|opus),audio/.test(x)), streams.join(' | '));
+    const pcm = execFileSync('ffmpeg', ['-v', 'error', '-i', withSound, '-af', 'pan=mono|c0=c0', '-f', 'f32le', '-ar', '48000', 'pipe:1'], { maxBuffer: 1 << 28 });
+    const f = new Float32Array(pcm.buffer, pcm.byteOffset, Math.floor(pcm.byteLength / 4));
+    let sum = 0;
+    for (let i = 4800; i < 43200; i++) sum += f[i] * f[i];
+    const level = Math.sqrt(sum / (43200 - 4800));
+    check('its sound decodes at the right level (0.5 sine = 0.35 RMS)', Math.abs(level - 0.354) < 0.06, level);
+    const soundDur = parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', withSound]).toString());
+    check('and the file is one second long', Math.abs(soundDur - 1) < 0.1, soundDur);
   }
 } catch (e) {
   check('suite ran to completion', false, String(e.stack || e.message).split('\n').slice(0, 4).join(' | '));

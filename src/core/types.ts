@@ -118,7 +118,10 @@ export const MATTE_MODES: { id: MatteMode; label: string }[] = [
   { id: 'lumaInv', label: 'Luma Inverted' },
 ];
 
-export type LayerType = 'solid' | 'shape' | 'text' | 'image' | 'precomp' | 'null' | 'adjustment';
+export type LayerType = 'solid' | 'shape' | 'text' | 'image' | 'video' | 'audio' | 'precomp' | 'null' | 'adjustment';
+
+/** Layers whose content is a footage file (and so may carry sound). */
+export const isFootageType = (t: LayerType): t is 'image' | 'video' | 'audio' => t === 'image' || t === 'video' || t === 'audio';
 
 export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'star' | 'path';
 
@@ -148,6 +151,8 @@ export type LayerData =
       fill?: boolean;
     }
   | { type: 'image'; assetId: string }
+  | { type: 'video'; assetId: string }
+  | { type: 'audio'; assetId: string }
   | { type: 'precomp'; compId: string };
 
 export interface Effect {
@@ -233,6 +238,8 @@ export interface Layer {
   visible: boolean;
   solo: boolean;
   locked: boolean;
+  /** Audio and video layers: leave this layer's sound out of the mix. */
+  muted?: boolean;
   motionBlur: boolean;
   parentId: string | null;
   blend: BlendMode;
@@ -266,12 +273,21 @@ export interface Comp {
   layers: Layer[];
 }
 
+export type AssetKind = 'image' | 'video' | 'audio';
+
 export interface Asset {
   id: string;
   name: string;
-  kind: 'image';
+  kind: AssetKind;
+  /** Pixels; 0 for audio. */
   width: number;
   height: number;
+  /** Video and audio: length in seconds. */
+  duration?: number;
+  /** Video: the file has a sound track. */
+  hasAudio?: boolean;
+  /** Video: nominal frame rate. */
+  fps?: number;
 }
 
 export interface Project {

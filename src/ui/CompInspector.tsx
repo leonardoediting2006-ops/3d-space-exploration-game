@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRef } from 'react';
 import type { Comp } from '../core/types';
-import { addShape, addText, importFiles, addFootageLayer, updateComp } from '../state/actions';
+import { addShape, addText, importFiles, addFootageLayer, updateComp, FOOTAGE_ACCEPT } from '../state/actions';
 import { appStore } from '../state/store';
 import { ColorField, NumberField } from './fields';
 import { Icon } from './Icon';
@@ -70,7 +70,7 @@ export function CompInspector({ comp }: { comp: Comp }) {
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept={FOOTAGE_ACCEPT}
             multiple
             hidden
             onChange={async (e) => {

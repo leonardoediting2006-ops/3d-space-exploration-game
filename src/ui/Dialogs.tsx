@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RGB } from '../core/types';
-import { exportPng, exportPngSequence, exportVideo, downloadBlob, videoSupport, type VideoFormat } from '../render/export';
+import { audioSupport, exportPng, exportPngSequence, exportVideo, downloadBlob, videoSupport, type VideoFormat } from '../render/export';
+import { compHasSound } from '../core/mix';
 import { addSolid, closeDialog, newComp, updateComp } from '../state/actions';
 import { appStore, timeStore, useActiveComp, useApp } from '../state/store';
 import { CommandPalette } from './CommandPalette';
@@ -207,7 +208,10 @@ function ExportDialog() {
   const [progress, setProgress] = useState<number | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [support, setSupport] = useState<Record<VideoFormat, boolean> | null>(null);
+  const [sound, setSound] = useState(true);
+  const [soundOk, setSoundOk] = useState<Record<VideoFormat, boolean> | null>(null);
   const abort = useRef<AbortController | null>(null);
+  const hasSound = compHasSound(project, comp);
 
   useEffect(() => {
     let live = true;
@@ -216,6 +220,14 @@ function ExportDialog() {
       live = false;
     };
   }, [comp, scale]);
+
+  useEffect(() => {
+    let live = true;
+    void Promise.all([audioSupport('webm'), audioSupport('mp4')]).then(([webm, mp4]) => live && setSoundOk({ webm, mp4 }));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const running = progress !== null;
   const r = range === 'work' ? { start: comp.workStart, end: comp.workEnd } : { start: 0, end: comp.duration };
@@ -228,7 +240,7 @@ function ExportDialog() {
     setProgress(0);
     const ctrl = new AbortController();
     abort.current = ctrl;
-    const opts = { scale, range: r, onProgress: setProgress, signal: ctrl.signal };
+    const opts = { scale, range: r, audio: sound, onProgress: setProgress, signal: ctrl.signal };
     try {
       if (kind === 'png') {
         const blob = await exportPng(project, comp, timeStore.get().t, scale, alpha);
@@ -284,6 +296,14 @@ function ExportDialog() {
       {(kind === 'webm' || kind === 'mp4') && (
         <Row label="Bitrate (Mbps)">
           <NumInput value={mbps} onChange={setMbps} min={1} max={200} />
+        </Row>
+      )}
+      {(kind === 'webm' || kind === 'mp4') && hasSound && (
+        <Row label="Sound">
+          <span className="inline">
+            <input type="checkbox" checked={sound && soundOk?.[kind] !== false} disabled={running || soundOk?.[kind] === false} onChange={(e) => setSound(e.target.checked)} data-testid="export-sound" /> Include the mix
+            {soundOk?.[kind] === false ? ' — this browser cannot encode sound' : ''}
+          </span>
         </Row>
       )}
       {kind === 'png' && (

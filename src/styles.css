@@ -3092,6 +3092,24 @@ kbd {
   right: 8px;
 }
 
+/* ---------------------------------------------------------------- sound */
+.layer-bar.audio {
+  overflow: hidden;
+}
+.layer-bar.audio .waveform {
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  pointer-events: none;
+}
+.layer-bar.audio .bar-name {
+  position: relative;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.sw.speaker.off {
+  color: var(--faint);
+}
+
 /* ---------------------------------------------------------------- graph editor */
 .tl-main[hidden] {
   display: none;

@@ -70,6 +70,8 @@ export interface AppState {
   snap: boolean;
   /** Play an animation once when it is applied from the Library or a picker. */
   previewOnApply: boolean;
+  /** Preview plays the composition's sound. */
+  audioOn: boolean;
   /** The timeline shows the Graph Editor instead of the layer bars. */
   graphOpen: boolean;
   graphMode: 'value' | 'speed';
@@ -132,6 +134,7 @@ export const appStore = createStore<AppState>({
   tlHeight: typeof window === 'undefined' ? 330 : Math.round(Math.min(330, Math.max(210, window.innerHeight * 0.34))),
   snap: true,
   previewOnApply: true,
+  audioOn: true,
   graphOpen: false,
   graphMode: 'value',
   graphNormalize: true,
