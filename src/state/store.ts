@@ -108,6 +108,8 @@ export interface AppState {
   dialog: Dialog | null;
   toast: { id: number; text: string; action?: { label: string; run: () => void } } | null;
   assetVersion: number;
+  /** Bumped when a video frame that was being fetched arrives, so the viewer redraws. */
+  videoVersion: number;
 }
 
 const first = createProject();
@@ -159,6 +161,7 @@ export const appStore = createStore<AppState>({
   dialog: null,
   toast: null,
   assetVersion: 0,
+  videoVersion: 0,
 });
 
 export const timeStore = createStore({ t: 0 });

@@ -144,3 +144,49 @@ export function writeTestWav(file, { seconds = 2, freqs = [440], amp = 0.5, samp
   head.writeUInt32LE(data.length, 40);
   fs.writeFileSync(file, Buffer.concat([head, data]));
 }
+
+/**
+ * Make a small WebM whose frame number can be read back from the picture: a white square moves
+ * right by 2 px per frame on a dark background (so frame i has its left edge at x = 10 + 2 i).
+ * Optionally muxes in a sound file. Needs ffmpeg.
+ */
+export async function makeTestVideo(file, { frames = 60, fps = 30, w = 160, h = 90, sound = null, gop = 15, codec = 'vp9' } = {}) {
+  const { execFileSync } = await import('node:child_process');
+  const zlib = await import('node:zlib');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ks-video-'));
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  for (let i = 0; i < frames; i++) {
+    const rows = [];
+    for (let y = 0; y < h; y++) {
+      const row = Buffer.alloc(1 + w * 4);
+      for (let x = 0; x < w; x++) {
+        const on = x >= 10 + 2 * i && x < 18 + 2 * i && y >= 40 && y < 48;
+        row.set(on ? [255, 255, 255, 255] : [30, 30, 30, 255], 1 + x * 4);
+      }
+      rows.push(row);
+    }
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(w, 0);
+    ihdr.writeUInt32BE(h, 4);
+    ihdr.set([8, 6, 0, 0, 0], 8);
+    fs.writeFileSync(
+      path.join(dir, `f_${String(i).padStart(3, '0')}.png`),
+      Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]),
+    );
+  }
+  const args = ['-v', 'error', '-y', '-framerate', String(fps), '-i', path.join(dir, 'f_%03d.png')];
+  if (sound) args.push('-i', sound);
+  if (codec === 'h264') args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12', '-g', String(gop), '-pix_fmt', 'yuv420p', '-movflags', '+faststart');
+  else args.push('-c:v', 'libvpx-vp9', '-crf', '12', '-b:v', '0', '-g', String(gop), '-pix_fmt', 'yuv420p');
+  if (sound) args.push('-c:a', codec === 'h264' ? 'aac' : 'libopus', '-shortest');
+  args.push(file);
+  execFileSync('ffmpeg', args);
+  fs.rmSync(dir, { recursive: true, force: true });
+}

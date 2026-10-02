@@ -3,6 +3,7 @@ import { ArrayBufferTarget as WebmTarget, Muxer as WebmMuxer } from 'webm-muxer'
 import { compHasSound, limit, mixComp, peakOf } from '../core/mix';
 import type { Comp, Project } from '../core/types';
 import { getAssetClip, MIX_RATE } from './assets';
+import { prepareFrame } from './video';
 import { renderComp } from './renderer';
 import { makeZip } from './zip';
 
@@ -42,6 +43,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export async function exportPng(project: Project, comp: Comp, time: number, scale = 1, transparent = false): Promise<Blob> {
+  await prepareFrame(project, comp, time);
   const c = document.createElement('canvas');
   renderComp(c, project, comp, time, { scale, transparent, mbSamples: EXPORT_MB_SAMPLES });
   return canvasToBlob(c);
@@ -54,6 +56,7 @@ export async function exportPngSequence(project: Project, comp: Comp, o: ExportO
   const digits = Math.max(4, String(n).length);
   for (let i = 0; i < n; i++) {
     if (o.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+    await prepareFrame(project, comp, o.range.start + i / comp.fps);
     renderComp(c, project, comp, o.range.start + i / comp.fps, { scale: o.scale, mbSamples: EXPORT_MB_SAMPLES });
     const blob = await canvasToBlob(c);
     entries.push({ name: `${comp.name}_${String(i).padStart(digits, '0')}.png`, data: new Uint8Array(await blob.arrayBuffer()) });
@@ -200,6 +203,7 @@ export async function exportVideo(
     for (let i = 0; i < n; i++) {
       if (o.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (failure) throw failure;
+      await prepareFrame(project, comp, o.range.start + i / comp.fps);
       renderComp(canvas, project, comp, o.range.start + i / comp.fps, { scale: o.scale, mbSamples: EXPORT_MB_SAMPLES });
       let source: HTMLCanvasElement = canvas;
       if (canvas.width !== w || canvas.height !== h) {

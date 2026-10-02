@@ -2,6 +2,7 @@
 // immutable, and only referenced by id. This module owns them and decodes them to images.
 
 import { peaksOf, type AudioClip } from '../core/mix';
+import { disposeAllVideos, loadVideo } from './video';
 
 const dataUrls = new Map<string, string>();
 const images = new Map<string, HTMLImageElement>();
@@ -31,9 +32,30 @@ export async function bytesOfDataUrl(url: string): Promise<ArrayBuffer> {
   return (await fetch(url)).arrayBuffer();
 }
 
+/** Remember the data URL a footage file is saved under (its bytes are decoded elsewhere). */
+export function registerDataUrl(id: string, dataUrl: string): void {
+  dataUrls.set(id, dataUrl);
+}
+
 export function setAssetData(id: string, dataUrl: string): Promise<void> {
   dataUrls.set(id, dataUrl);
   const mime = /^data:([^;,]+)/i.exec(dataUrl)?.[1]?.toLowerCase() ?? '';
+  if (mime.startsWith('video/')) {
+    return (async () => {
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        await loadVideo(id, blob);
+        try {
+          setAudioAsset(id, dataUrl, await decodeAudio(await blob.arrayBuffer()));
+        } catch {
+          /* no sound track */
+        }
+        listeners.forEach((fn) => fn());
+      } catch {
+        /* the layer shows a placeholder */
+      }
+    })();
+  }
   if (mime.startsWith('audio/')) {
     return bytesOfDataUrl(dataUrl)
       .then(decodeAudio)
@@ -77,6 +99,7 @@ export function getAssetPeaks(id: string): Float32Array | undefined {
 export const PEAKS_PER_SECOND = 200;
 
 export function clearAssets(): void {
+  disposeAllVideos();
   dataUrls.clear();
   images.clear();
   audios.clear();

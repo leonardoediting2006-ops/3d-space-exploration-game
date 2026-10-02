@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { open, writeTestWav } from './lib.mjs';
+import { makeTestVideo, open, writeTestWav } from './lib.mjs';
 
 const { page, check, finish, OUT } = await open({ electron: true });
 
@@ -134,6 +134,46 @@ try {
     check('its sound decodes at the right level (0.5 sine = 0.35 RMS)', Math.abs(level - 0.354) < 0.06, level);
     const soundDur = parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', withSound]).toString());
     check('and the file is one second long', Math.abs(soundDur - 1) < 0.1, soundDur);
+
+    // 5) importing an H.264 MP4 (with AAC sound) and rendering it frame-accurately
+    const h264 = path.join(OUT, 'clip.mp4');
+    const longTone = path.join(OUT, 'long-tone.wav');
+    writeTestWav(longTone, { seconds: 3, freqs: [440], amp: 0.5 });
+    await makeTestVideo(h264, { frames: 45, codec: 'h264', sound: longTone });
+    await page.evaluate(() => {
+      const ks = window.__ks;
+      const s = ks.appStore.get();
+      ks.actions.updateComp(s.activeCompId, { width: 320, height: 180, duration: 6, workStart: 0, workEnd: 6 });
+      ks.actions.deleteLayers(ks.appStore.get().project.comps[s.activeCompId].layers.map((l) => l.id));
+    });
+    await page.setInputFiles('[data-testid=project-panel] input[type=file]', h264);
+    await page.waitForTimeout(2500);
+    const vid = await page.evaluate(() => Object.values(window.__ks.appStore.get().project.assets).find((a) => a.kind === 'video') ?? null);
+    check('an H.264 MP4 imports as video, with its sound', vid && vid.width === 160 && vid.height === 90 && vid.hasAudio === true && Math.abs(vid.duration - 1.5) < 0.1, JSON.stringify(vid));
+    if (vid) {
+      await page.evaluate((id) => {
+        const ks = window.__ks;
+        ks.actions.setTime(0.5);
+        const lid = ks.actions.addFootageLayer(id);
+        ks.actions.setPropValue(lid, 'transform', 'position', [160, 90]);
+      }, vid.id);
+      const idxAt = (T) =>
+        page.evaluate(async (time) => {
+          const r = await import('/src/render/renderer.ts');
+          const ks = window.__ks;
+          const s = ks.appStore.get();
+          const comp = s.project.comps[s.activeCompId];
+          await ks.video.prepareFrame(s.project, comp, time);
+          const c = document.createElement('canvas');
+          r.renderComp(c, s.project, comp, time, { scale: 1, mbSamples: 0 });
+          const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+          for (let x = 0; x < c.width; x++) if (d[(89 * c.width + x) * 4] > 160) return Math.round((x - 80 - 10) / 2);
+          return -1;
+        }, T);
+      const got = [];
+      for (const k of [0, 7, 22, 40, 12]) got.push(await idxAt(0.5 + k / 30));
+      check('the H.264 clip renders the exact frame at each time', JSON.stringify(got) === JSON.stringify([0, 7, 22, 40, 12]), got.join(','));
+    }
   }
 } catch (e) {
   check('suite ran to completion', false, String(e.stack || e.message).split('\n').slice(0, 4).join(' | '));

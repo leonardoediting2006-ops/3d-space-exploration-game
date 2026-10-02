@@ -4,6 +4,7 @@ import { computeCharStyles, evalAnimator, mixColor } from '../core/textAnim';
 import { TAU } from '../core/math';
 import type { Layer, Project } from '../core/types';
 import { getAssetImage } from './assets';
+import { getVideoFrame } from './video';
 import { textFont } from './geometry';
 
 /* Painters draw a layer's own content in its local space. The caller has already set the
@@ -228,6 +229,16 @@ export function paintContent(ctx: CanvasRenderingContext2D, project: Project, la
       const a = project.assets[d.assetId];
       const img = getAssetImage(d.assetId);
       if (a && img) ctx.drawImage(img, 0, 0, a.width, a.height);
+      else {
+        ctx.fillStyle = 'rgba(120,120,130,0.5)';
+        ctx.fillRect(0, 0, a?.width ?? 200, a?.height ?? 200);
+      }
+      break;
+    }
+    case 'video': {
+      const a = project.assets[d.assetId];
+      const frame = getVideoFrame(d.assetId, t - layer.start);
+      if (a && frame) ctx.drawImage(frame, 0, 0, a.width, a.height);
       else {
         ctx.fillStyle = 'rgba(120,120,130,0.5)';
         ctx.fillRect(0, 0, a?.width ?? 200, a?.height ?? 200);

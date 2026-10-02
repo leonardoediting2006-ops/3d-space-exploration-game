@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { timecode } from '../core/time';
 import { getAssetData } from '../render/assets';
+import { getVideoThumb } from '../render/video';
 import { addFootageLayer, addPrecompLayer, deleteAsset, deleteComp, FOOTAGE_ACCEPT, importFiles, openComp, openDialog } from '../state/actions';
 import { appStore, useApp } from '../state/store';
 import { Icon } from './Icon';
@@ -90,7 +91,7 @@ export function ProjectPanel() {
                 {a.kind === 'audio' ? (
                   <Waveform assetId={id} from={0} to={a.duration ?? 0} width={40} height={30} color="rgba(127,158,255,0.9)" />
                 ) : a.kind === 'video' ? (
-                  <Icon name="film" size={16} />
+                  getVideoThumb(id) ? <img src={getVideoThumb(id)!} alt="" /> : <Icon name="film" size={16} />
                 ) : url ? (
                   <img src={url} alt="" />
                 ) : (

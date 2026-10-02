@@ -61,6 +61,7 @@ import type {
 } from '../core/types';
 import { allAssetData, clearAssets, decodeAudio, imageSize, readFileAsDataUrl, setAssetData, setAudioAsset } from '../render/assets';
 import { startAudio, stopAudio } from '../render/playback';
+import { disposeVideo, stopVideoPlayback, syncVideoPlayback } from '../render/video';
 import { layerMap, layerPolygon, localBounds, parentWorld } from '../render/geometry';
 import { downloadBlob } from '../render/export';
 import { appStore, activeComp, commit, resetHistory, timeStore, toast } from './store';
@@ -118,6 +119,7 @@ function restartPlayback(): void {
   playWall = performance.now();
   playFrom = now();
   startSound(playFrom);
+  syncVideoPlayback(S().project, activeComp(), playFrom, true);
 }
 /** A one-off preview: where to stop, and where the playhead goes back to afterwards. */
 let preview: { stopAt: number; returnTo: number } | null = null;
@@ -139,6 +141,7 @@ function tick(wall: number): void {
       playFrom = comp.workStart;
       t = comp.workStart;
       startSound(t);
+      syncVideoPlayback(s.project, comp, t, true);
     } else {
       pause();
       setTimeRaw(end - 1 / comp.fps);
@@ -146,6 +149,7 @@ function tick(wall: number): void {
     }
   }
   setTimeRaw(t);
+  syncVideoPlayback(s.project, comp, t);
   raf = requestAnimationFrame(tick);
 }
 
@@ -178,12 +182,14 @@ export function play(): void {
   playWall = performance.now();
   playFrom = now();
   startSound(playFrom);
+  syncVideoPlayback(S().project, activeComp(), playFrom, true);
   raf = requestAnimationFrame(tick);
 }
 
 export function pause(): void {
   cancelAnimationFrame(raf);
   stopAudio();
+  stopVideoPlayback();
   preview = null;
   if (S().playing) appStore.set({ playing: false });
 }
@@ -891,6 +897,7 @@ export async function importFiles(files: File[]): Promise<string[]> {
 }
 
 export function deleteAsset(id: string): void {
+  disposeVideo(id);
   commit((p) => {
     delete p.assets[id];
     p.assetOrder = p.assetOrder.filter((x) => x !== id);
@@ -943,7 +950,13 @@ export async function openProjectText(text: string, fileName: string): Promise<b
 
 export function saveProjectFile(): void {
   const s = S();
-  const text = serializeProject(s.project, allAssetData());
+  let text: string;
+  try {
+    text = serializeProject(s.project, allAssetData());
+  } catch {
+    toast('This project is too large to save as one file: its footage adds up to more than the browser can hold in a single piece of text. Remove some footage and try again.');
+    return;
+  }
   const name = s.fileName.endsWith('.kfs') ? s.fileName : `${s.fileName.replace(/\.[^.]+$/, '')}.kfs`;
   downloadBlob(new Blob([text], { type: 'application/json' }), name);
   appStore.set({ dirty: false, fileName: name });

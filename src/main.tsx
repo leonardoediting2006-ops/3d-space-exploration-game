@@ -8,6 +8,7 @@ import { createDemoProject } from './core/demo';
 import { serializeProject } from './core/serialize';
 import * as assets from './render/assets';
 import * as playback from './render/playback';
+import * as video from './render/video';
 import { allAssetData } from './render/assets';
 import * as actions from './state/actions';
 import { appStore, timeStore } from './state/store';
@@ -45,6 +46,8 @@ async function boot() {
   });
 
   void presetSync.restoreSync();
+  // thumbnails and parked-frame fetches arriving: refresh the panels and the viewer
+  video.onVideoFrames(() => appStore.set({ assetVersion: appStore.get().assetVersion + 1 }));
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -55,7 +58,7 @@ async function boot() {
   );
   // Debug hook for the end-to-end tests: always on in dev, opt-in in builds with ?debug
   if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
-    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions, presets, presetSync, assets, playback };
+    (window as unknown as Record<string, unknown>).__ks = { appStore, timeStore, actions, presets, presetSync, assets, playback, video };
   }
 }
 

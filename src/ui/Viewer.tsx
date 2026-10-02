@@ -4,6 +4,7 @@ import { apply, applyVec, clamp, invert, radToDeg, type Mat } from '../core/math
 import { corner, ellipsePath, fromPoints, isSmooth, nearestOnPath, rectPath, smoothVertex, toPoints, type PathPt } from '../core/path';
 import type { Comp, Keyframe, Layer, Project, PropGroup, Vec2 } from '../core/types';
 import { renderComp } from '../render/renderer';
+import { missingFrames, prepareFrame } from '../render/video';
 import {
   hitTestLayer,
   layerMap,
@@ -349,6 +350,8 @@ export function Viewer() {
   const lastOverlayKey = useRef<unknown[]>([]);
   const rafRef = useRef(0);
 
+  /** Fetching the video frame for a parked playhead: one request at a time, always for the latest time. */
+  const fetching = useRef(false);
   const draw = () => {
     rafRef.current = 0;
     const s = appStore.get();
@@ -358,7 +361,14 @@ export function Viewer() {
     const ov = overlay.current;
     if (!canvas || !ov) return;
     const sc = scaleFor();
-    const renderKey = [s.project, s.activeCompId, t, sc, s.assetVersion, s.checkerboard];
+    if (!fetching.current && missingFrames(s.project, c, t).length) {
+      fetching.current = true;
+      void prepareFrame(s.project, c, t).finally(() => {
+        fetching.current = false;
+        appStore.set({ videoVersion: appStore.get().videoVersion + 1 });
+      });
+    }
+    const renderKey = [s.project, s.activeCompId, t, sc, s.assetVersion, s.videoVersion, s.checkerboard];
     if (renderKey.some((v, i) => v !== lastKey.current[i])) {
       lastKey.current = renderKey;
       renderComp(canvas, s.project, c, t, { scale: sc, transparent: s.checkerboard, mbSamples: 6 });
